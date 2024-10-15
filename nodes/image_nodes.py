@@ -18,6 +18,7 @@ except:
     pass
 from PIL import ImageGrab, ImageDraw, ImageFont, Image, ImageSequence, ImageOps
 
+import execution_context
 from nodes import MAX_RESOLUTION, SaveImage
 from comfy_extras.nodes_mask import ImageCompositeMasked
 from comfy.cli_args import args
@@ -31,7 +32,7 @@ class ImagePass:
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {               
+            "required": {
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -126,7 +127,6 @@ https://github.com/hahnec/color-matcher/
     
 class SaveImageWithAlpha:
     def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
         self.prefix_append = ""
 
@@ -136,7 +136,7 @@ class SaveImageWithAlpha:
                     {"images": ("IMAGE", ),
                     "mask": ("MASK", ),
                     "filename_prefix": ("STRING", {"default": "ComfyUI"})},
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "user_hash": "USER_HASH"},
                 }
 
     RETURN_TYPES = ()
@@ -147,10 +147,11 @@ class SaveImageWithAlpha:
 Saves an image and mask as .PNG with the mask as the alpha channel. 
 """
 
-    def save_images_alpha(self, images, mask, filename_prefix="ComfyUI_image_with_alpha", prompt=None, extra_pnginfo=None):
+    def save_images_alpha(self, images, mask, filename_prefix="ComfyUI_image_with_alpha", prompt=None, extra_pnginfo=None, user_hash=''):
         from PIL.PngImagePlugin import PngInfo
         filename_prefix += self.prefix_append
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+        output_dir = folder_paths.get_output_directory(user_hash)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
         if mask.dtype == torch.float16:
             mask = mask.to(torch.float32)
@@ -254,13 +255,13 @@ Concatenates the image2 to image1 in the specified direction.
                 # Match the width and adjust the height to preserve aspect ratio
                 target_width = target_shape[2]  # B, H, W, C format
                 target_height = int(target_width / original_aspect_ratio)
-            
+
             # Adjust image2 to the expected format for common_upscale
             image2_for_upscale = image2.movedim(-1, 1)  # Move C to the second position (B, C, H, W)
-            
+
             # Resize image2 to match the target size while preserving aspect ratio
             image2_resized = common_upscale(image2_for_upscale, target_width, target_height, "lanczos", "disabled")
-            
+
             # Adjust image2 back to the original format (B, H, W, C) after resizing
             image2_resized = image2_resized.movedim(1, -1)
         else:
@@ -301,7 +302,7 @@ class ImageConcatFromBatch:
             "images": ("IMAGE",),
             "num_columns": ("INT", {"default": 3, "min": 1, "max": 255, "step": 1}),
             "match_image_size": ("BOOLEAN", {"default": False}),
-            "max_resolution": ("INT", {"default": 4096}), 
+            "max_resolution": ("INT", {"default": 4096}),
             },
         }
 
@@ -440,7 +441,7 @@ Concatenates the 9 input images into a 3x3 grid.
     
 class ImageBatchTestPattern:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
             "batch_size": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
             "start_from": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
@@ -448,19 +449,23 @@ class ImageBatchTestPattern:
             "text_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
             "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
             "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-            "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+            "font": (folder_paths.get_filename_list(context, "kjnodes_fonts"), ),
             "font_size": ("INT", {"default": 255,"min": 8, "max": 4096, "step": 1}),
-        }}
+        },
+        "hidden": {
+            "context": "EXECUTION_CONTEXT"
+        },
+        }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "generatetestpattern"
     CATEGORY = "KJNodes/text"
 
-    def generatetestpattern(self, batch_size, font, font_size, start_from, width, height, text_x, text_y):
+    def generatetestpattern(self, batch_size, font, font_size, start_from, width, height, text_x, text_y, context: execution_context.ExecutionContext):
         out = []
         # Generate the sequential numbers for each image
         numbers = np.arange(start_from, start_from + batch_size)
-        font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+        font_path = folder_paths.get_full_path(context, "kjnodes_fonts", font)
 
         for number in numbers:
             # Create a black image with the number as a random color text
@@ -534,7 +539,7 @@ Can be used for realtime diffusion with autoqueue.
 
         elapsed_time = time.time() - start_time
         print(f"screengrab took {elapsed_time} seconds.")
-        
+
         return (torch.cat(captures, dim=0),)
     
 class Screencap_mss:
@@ -563,25 +568,25 @@ Can be used for realtime diffusion with autoqueue.
                  "num_frames": ("INT", {"default": 1,"min": 1, "max": 255, "step": 1}),
                  "delay": ("FLOAT", {"default": 0.1,"min": 0.0, "max": 10.0, "step": 0.01}),
         },
-    } 
+    }
 
     def screencap(self, x, y, width, height, num_frames, delay):
         from mss import mss
         captures = []
         with mss() as sct:
             bbox = {'top': y, 'left': x, 'width': width, 'height': height}
-            
+
             for _ in range(num_frames):
                 sct_img = sct.grab(bbox)
                 img_np = np.array(sct_img)
                 img_torch = torch.from_numpy(img_np[..., [2, 1, 0]]).float() / 255.0
                 captures.append(img_torch)
-                
+
                 if num_frames > 1:
                     time.sleep(delay)
-        
+
         return (torch.stack(captures, 0),)
-    
+
 class WebcamCaptureCV2:
 
     @classmethod
@@ -608,7 +613,7 @@ Can be used for realtime diffusion with autoqueue.
                  "cam_index": ("INT", {"default": 0,"min": 0, "max": 255, "step": 1}),
                  "release": ("BOOLEAN", {"default": False}),
             },
-        } 
+        }
 
     def capture(self, x, y, cam_index, width, height, release):
         # Check if the camera index has changed or the capture object doesn't exist
@@ -624,24 +629,24 @@ Can be used for realtime diffusion with autoqueue.
                 pass
             if not self.cap.isOpened():
                 raise Exception("Could not open webcam")
-    
+
         ret, frame = self.cap.read()
         if not ret:
             raise Exception("Failed to capture image from webcam")
-    
+
         # Crop the frame to the specified bbox
         frame = frame[y:y+height, x:x+width]
         img_torch = torch.from_numpy(frame[..., [2, 1, 0]]).float() / 255.0
-    
+
         if release:
             self.cap.release()
             self.cap = None
-    
+
         return (img_torch.unsqueeze(0),)
-    
+
 class AddLabel:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
             "image":("IMAGE",),  
             "text_x": ("INT", {"default": 10, "min": 0, "max": 4096, "step": 1}),
@@ -650,7 +655,7 @@ class AddLabel:
             "font_size": ("INT", {"default": 32, "min": 0, "max": 4096, "step": 1}),
             "font_color": ("STRING", {"default": "white"}),
             "label_color": ("STRING", {"default": "black"}),
-            "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+            "font": (folder_paths.get_filename_list(context, "kjnodes_fonts"), ),
             "text": ("STRING", {"default": "Text"}),
             "direction": (
             [   'up',
@@ -665,7 +670,10 @@ class AddLabel:
             },
             "optional":{
                 "caption": ("STRING", {"default": "", "forceInput": True}),
-            }
+            },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            },
             }
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "addlabel"
@@ -678,11 +686,11 @@ Fonts are loaded from this folder:
 ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
 """
         
-    def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction, caption=""):
+    def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction, caption="", context: execution_context.ExecutionContext = None):
         batch_size = image.shape[0]
         width = image.shape[2]
         
-        font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path("kjnodes_fonts", font)
+        font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path(context, "kjnodes_fonts", font)
         
         def process_image(input_image, caption_text):
             if direction == 'overlay':
@@ -1082,7 +1090,6 @@ class ImagePadForOutpaintTargetSize:
     
 class ImageAndMaskPreview(SaveImage):
     def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
         self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
         self.compress_level = 4
@@ -1099,7 +1106,7 @@ class ImageAndMaskPreview(SaveImage):
                 "image": ("IMAGE",),
                 "mask": ("MASK",),                
             },
-            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "user_hash": "USER_HASH"},
         }
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("composite",)
@@ -1114,7 +1121,7 @@ this allows for the preview to be passed for video combine
 nodes for example.
 """
 
-    def execute(self, mask_opacity, mask_color, pass_through, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
+    def execute(self, mask_opacity, mask_color, pass_through, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None, user_hash=''):
         if mask is not None and image is None:
             preview = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
         elif mask is None and image is not None:
@@ -1135,7 +1142,7 @@ nodes for example.
             preview, = ImageCompositeMasked.composite(self, image, mask_image, 0, 0, True, mask_adjusted)
         if pass_through:
             return (preview, )
-        return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo))
+        return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo, user_hash))
         
 class CrossFadeImages:
     
@@ -1224,7 +1231,7 @@ class CrossFadeImages:
         beginning_images_1 = images_1[:transition_start_index]
         crossfade_images = torch.cat([beginning_images_1, crossfade_images], dim=0)
         return (crossfade_images, )
-    
+
 class CrossFadeImagesMulti:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "crossfadeimages"
@@ -1240,8 +1247,8 @@ class CrossFadeImagesMulti:
                  "interpolation": (["linear", "ease_in", "ease_out", "ease_in_out", "bounce", "elastic", "glitchy", "exponential_ease_out"],),
                  "transitioning_frames": ("INT", {"default": 1,"min": 0, "max": 4096, "step": 1}),
         },
-    } 
-    
+    }
+
     def crossfadeimages(self, inputcount, transitioning_frames, interpolation, **kwargs):
 
         def crossfade(images_1, images_2, alpha):
@@ -1281,7 +1288,7 @@ class CrossFadeImagesMulti:
         width = image_1.shape[2]
 
         easing_function = easing_functions[interpolation]
-       
+
         for c in range(1, inputcount):
             frames = []
             new_image = kwargs[f"image_{c + 1}"]
@@ -1301,10 +1308,10 @@ class CrossFadeImagesMulti:
                 alpha_tensor = torch.tensor(alpha, dtype=last_frame_image_1.dtype, device=last_frame_image_1.device)
                 frame_image = crossfade(last_frame_image_1, first_frame_image_2, alpha_tensor)
                 frames.append(frame_image)
-        
+
             frames = torch.stack(frames)
             image_1 = torch.cat((image_1, frames, new_image), dim=0)
-        
+
         return image_1,
 
 class GetImageRangeFromBatch:
@@ -1601,7 +1608,6 @@ with the **inputcount** and clicking update.
 
 class PreviewAnimation:
     def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
         self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
         self.compress_level = 1
@@ -1613,6 +1619,9 @@ class PreviewAnimation:
                     {
                      "fps": ("FLOAT", {"default": 8.0, "min": 0.01, "max": 1000.0, "step": 0.01}),
                      },
+                "hidden": {
+                    "user_hash": "USER_HASH"
+                    },
                 "optional": {
                     "images": ("IMAGE", ),
                     "masks": ("MASK", ),
@@ -1624,9 +1633,10 @@ class PreviewAnimation:
     OUTPUT_NODE = True
     CATEGORY = "KJNodes/image"
 
-    def preview(self, fps, images=None, masks=None):
+    def preview(self, fps, user_hash, images=None, masks=None):
+        output_dir = folder_paths.get_temp_directory(user_hash)
         filename_prefix = "AnimPreview"
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
         results = list()
 
         pil_images = []
@@ -1720,7 +1730,7 @@ Keep proportions keeps the aspect ratio of the image, by
 highest dimension.  
 """
 
-    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by, 
+    def resize(self, image, width, height, keep_proportion, upscale_method, divisible_by,
                width_input=None, height_input=None, get_image_size=None, crop="disabled"):
         B, H, W, C = image.shape
 
@@ -1730,7 +1740,7 @@ highest dimension.
             height = height_input
         if get_image_size is not None:
             _, height, width, _ = get_image_size.shape
-        
+
         if keep_proportion and get_image_size is None:
                 # If one of the dimensions is zero, calculate it to maintain the aspect ratio
                 if width == 0 and height != 0:
@@ -1749,22 +1759,22 @@ highest dimension.
                 width = W
             if height == 0:
                 height = H
-      
+
         if divisible_by > 1 and get_image_size is None:
             width = width - (width % divisible_by)
             height = height - (height % divisible_by)
-        
+
         image = image.movedim(-1,1)
         image = common_upscale(image, width, height, upscale_method, crop)
         image = image.movedim(1,-1)
 
         return(image, image.shape[2], image.shape[1],)
-import pathlib    
+import pathlib
 class LoadAndResizeImage:
     _color_channels = ["alpha", "red", "green", "blue"]
     @classmethod
-    def INPUT_TYPES(s):
-        input_dir = folder_paths.get_input_directory()
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
+        input_dir = folder_paths.get_input_directory(context.user_hash)
         files = [f.name for f in pathlib.Path(input_dir).iterdir() if f.is_file()]
         return {"required":
                     {
@@ -1775,9 +1785,13 @@ class LoadAndResizeImage:
                     "repeat": ("INT", { "default": 1, "min": 1, "max": 4096, "step": 1, }),
                     "keep_proportion": ("BOOLEAN", { "default": False }),
                     "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
-                    "mask_channel": (s._color_channels, {"tooltip": "Channel to use for the mask output"}), 
+                    "mask_channel": (s._color_channels, {"tooltip": "Channel to use for the mask output"}),
                     "background_color": ("STRING", { "default": "", "tooltip": "Fills the alpha channel with the specified color."}),
                     },
+                "hidden":
+                    {
+                    "context": "EXECUTION_CONTEXT"
+                    }
                 }
 
     CATEGORY = "KJNodes/image"
@@ -1785,12 +1799,12 @@ class LoadAndResizeImage:
     RETURN_NAMES = ("image", "mask", "width", "height","image_path",)
     FUNCTION = "load_image"
 
-    def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel, background_color):
+    def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel, background_color, context: execution_context.ExecutionContext):
         from PIL import ImageColor, Image, ImageOps, ImageSequence
         import numpy as np
         import torch
-        image_path = folder_paths.get_annotated_filepath(image)
-        
+        image_path = folder_paths.get_annotated_filepath(image, context.user_hash)
+
         import node_helpers
         img = node_helpers.pillow(Image.open, image_path)
 
@@ -1809,7 +1823,7 @@ class LoadAndResizeImage:
             bg_color_rgba += (255,)  # Add alpha channel
         else:
             bg_color_rgba = None  # No background color specified
-        
+
         output_images = []
         output_masks = []
         w, h = None, None
@@ -1839,12 +1853,12 @@ class LoadAndResizeImage:
 
             if frame.mode == 'I':
                 frame = frame.point(lambda i: i * (1 / 255))
-            
+
             if frame.mode == 'P':
                 frame = frame.convert("RGBA")
             elif 'A' in frame.getbands():
                 frame = frame.convert("RGBA")
-            
+
             # Extract alpha channel if it exists
             if 'A' in frame.getbands() and bg_color_rgba:
                 alpha_mask = np.array(frame.getchannel('A')).astype(np.float32) / 255.0
@@ -1854,7 +1868,7 @@ class LoadAndResizeImage:
                 frame = Image.alpha_composite(bg_image, frame)
             else:
                 alpha_mask = torch.zeros((64, 64), dtype=torch.float32, device="cpu")
-            
+
             image = frame.convert("RGB")
 
             if len(output_images) == 0:
@@ -1868,7 +1882,7 @@ class LoadAndResizeImage:
 
             image = np.array(image).astype(np.float32) / 255.0
             image = torch.from_numpy(image)[None,]
-            
+
             c = mask_channel[0].upper()
             if c in frame.getbands():
                 if resize:
@@ -1907,8 +1921,8 @@ class LoadAndResizeImage:
     #     return m.digest().hex()
 
     @classmethod
-    def VALIDATE_INPUTS(s, image):
-        if not folder_paths.exists_annotated_filepath(image):
+    def VALIDATE_INPUTS(s, image, context: execution_context.ExecutionContext):
+        if not folder_paths.exists_annotated_filepath(image, context.user_hash):
             return "Invalid image file: {}".format(image)
 
         return True
@@ -2019,42 +2033,41 @@ class ImageGridtoBatch:
                     "rows": ("INT", {"default": 0, "min": 1, "max": 8, "tooltip": "The number of rows in the grid. Set to 0 for automatic calculation."}),
                   }
                 }
-    
+
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "decompose"
     CATEGORY = "KJNodes/image"
     DESCRIPTION = "Converts a grid of images to a batch of images."
-        
+
     def decompose(self, image, columns, rows):
         B, H, W, C = image.shape
         print("input size: ", image.shape)
-        
+
         # Calculate cell width, rounding down
         cell_width = W // columns
-        
+
         if rows == 0:
             # If rows is 0, calculate number of full rows
             rows = H // cell_height
         else:
             # If rows is specified, adjust cell_height
             cell_height = H // rows
-        
+
         # Crop the image to fit full cells
         image = image[:, :rows*cell_height, :columns*cell_width, :]
-        
+
         # Reshape and permute the image to get the grid
         image = image.view(B, rows, cell_height, columns, cell_width, C)
         image = image.permute(0, 1, 3, 2, 4, 5).contiguous()
         image = image.view(B, rows * columns, cell_height, cell_width, C)
-        
+
         # Reshape to the final batch tensor
         img_tensor = image.view(-1, cell_height, cell_width, C)
-        
+
         return (img_tensor,)
 
 class SaveImageKJ:
-    def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
+    def __init__(self, context: execution_context.ExecutionContext):
         self.type = "output"
         self.prefix_append = ""
         self.compress_level = 4
@@ -2069,10 +2082,10 @@ class SaveImageKJ:
             },
             "optional": {
                 "caption_file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file."}),
-                "caption": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}), 
+                "caption": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}),
             },
             "hidden": {
-                "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
+                "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "context": "EXECUTION_CONTEXT"
             },
         }
 
@@ -2085,10 +2098,10 @@ class SaveImageKJ:
     CATEGORY = "image"
     DESCRIPTION = "Saves the input images to your ComfyUI output directory."
 
-    def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt"):
+    def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, context: execution_context.ExecutionContext=None, caption=None, caption_file_extension=".txt"):
         filename_prefix += self.prefix_append
-        
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+        output_dir = folder_paths.get_output_directory(context.user_hash)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir, images[0].shape[1], images[0].shape[0])
         if output_folder != "output":
             if not os.path.exists(output_folder):
                 os.makedirs(output_folder, exist_ok=True)
@@ -2125,10 +2138,10 @@ class SaveImageKJ:
 
 
 
-        return { "ui": { 
+        return { "ui": {
                 "images": results },
                 "result": (file,) }
-    
+
 to_pil_image = T.ToPILImage()
 
 class FastPreview:
@@ -2147,7 +2160,7 @@ class FastPreview:
     CATEGORY = "KJNodes/experimental"
     OUTPUT_NODE = True
 
-    def preview(self, image, format, quality):        
+    def preview(self, image, format, quality):
         pil_image = to_pil_image(image[0].permute(2, 0, 1))
 
         with io.BytesIO() as buffered:
@@ -2155,8 +2168,8 @@ class FastPreview:
             img_bytes = buffered.getvalue()
 
         img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-    
+
         return {
-            "ui": {"bg_image": [img_base64]}, 
+            "ui": {"bg_image": [img_base64]},
             "result": ()
         }

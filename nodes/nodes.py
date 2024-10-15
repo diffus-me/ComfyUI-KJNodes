@@ -5,6 +5,8 @@ from PIL import Image
 import json, re, os, io, time
 import importlib
 import model_management
+
+import execution_context
 import folder_paths
 from nodes import MAX_RESOLUTION
 from comfy.utils import common_upscale, ProgressBar
@@ -1385,21 +1387,24 @@ https://huggingface.co/stabilityai/sv3d
 
 class LoadResAdapterNormalization:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": {
                 "model": ("MODEL",),
-                "resadapter_path": (folder_paths.get_filename_list("checkpoints"), )
-            } 
+                "resadapter_path": (folder_paths.get_filename_list(context, "checkpoints"), )
+            } ,
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            },
         }
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_res_adapter"
     CATEGORY = "KJNodes/experimental"
 
-    def load_res_adapter(self, model, resadapter_path):
+    def load_res_adapter(self, model, resadapter_path, context: execution_context.ExecutionContext):
         print("ResAdapter: Checking ResAdapter path")
-        resadapter_full_path = folder_paths.get_full_path("checkpoints", resadapter_path)
+        resadapter_full_path = folder_paths.get_full_path(context, "checkpoints", resadapter_path)
         if not os.path.exists(resadapter_full_path):
             raise Exception("Invalid model path")
         else:
@@ -1897,16 +1902,19 @@ class FluxBlockLoraLoader:
         self.loaded_lora = None
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
                 "model": ("MODEL", {"tooltip": "The diffusion model the LoRA will be applied to."}),
                 "strength_model": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01, "tooltip": "How strongly to modify the diffusion model. This value can be negative."}),
                 
                 },
                 "optional": {
-                    "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
+                    "lora_name": (folder_paths.get_filename_list(context, "loras"), {"tooltip": "The name of the LoRA."}),
                     "opt_lora_path": ("STRING", {"forceInput": True, "tooltip": "Absolute path of the LoRA."}),
                     "blocks": ("SELECTEDBLOCKS",),
+                },
+                "hidden": {
+                    "context": "EXECUTION_CONTEXT"
                 }
                }
     
@@ -1916,14 +1924,14 @@ class FluxBlockLoraLoader:
     FUNCTION = "load_lora"
     CATEGORY = "KJNodes/experimental"
 
-    def load_lora(self, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None):
+    def load_lora(self, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None, context: execution_context.ExecutionContext=None):
         from comfy.utils import load_torch_file
         import comfy.lora
 
         if opt_lora_path:
             lora_path = opt_lora_path
         else:
-            lora_path = folder_paths.get_full_path("loras", lora_name)
+            lora_path = folder_paths.get_full_path(context, "loras", lora_name)
         
         lora = None
         if self.loaded_lora is not None:
@@ -2079,8 +2087,8 @@ class SetShakkerLabsUnionControlNetType:
         return (control_net,)
 
 class ModelSaveKJ:
-    def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
+    def __init__(self, execution: execution_context.ExecutionContext):
+        pass
 
     @classmethod
     def INPUT_TYPES(s):
@@ -2088,15 +2096,16 @@ class ModelSaveKJ:
                               "filename_prefix": ("STRING", {"default": "diffusion_models/ComfyUI"}),
                               "model_key_prefix": ("STRING", {"default": "model.diffusion_model."}),
                               },
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},}
+                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "context": "EXECUTION_CONTEXT"},}
     RETURN_TYPES = ()
     FUNCTION = "save"
     OUTPUT_NODE = True
 
     CATEGORY = "advanced/model_merging"
 
-    def save(self, model, filename_prefix, model_key_prefix, prompt=None, extra_pnginfo=None):
+    def save(self, model, filename_prefix, model_key_prefix, prompt=None, extra_pnginfo=None, context: execution_context.ExecutionContext=NOne):
         from comfy.utils import save_torch_file
+        output_dir = folder_paths.get_output_directory(context.user_hash)
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
     
         output_checkpoint = f"{filename}_{counter:05}_.safetensors"

@@ -1,3 +1,4 @@
+import execution_context
 import folder_paths
 import os
 import torch
@@ -14,9 +15,9 @@ class Intrinsic_lora_sampling:
         self.loaded_lora = None
         
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": { "model": ("MODEL",),
-                "lora_name": (folder_paths.get_filename_list("intrinsic_loras"), ),
+                "lora_name": (folder_paths.get_filename_list(context, "intrinsic_loras"), ),
                 "task": (
                 [   
                     'depth map',
@@ -32,10 +33,13 @@ class Intrinsic_lora_sampling:
                 "vae": ("VAE", ),
                 "per_batch": ("INT", {"default": 16, "min": 1, "max": 4096, "step": 1}),
         },
-            "optional": {
+        "optional": {
             "image": ("IMAGE",),
             "optional_latent": ("LATENT",),
             },
+        "hidden": {
+            "context": "EXECUTION_CONTEXT"
+        },
         }
 
     RETURN_TYPES = ("IMAGE", "LATENT",)
@@ -48,7 +52,7 @@ These LoRAs are tiny and thus included
 with this node pack.
 """
 
-    def onestepsample(self, model, lora_name, clip, vae, text, task, per_batch, image=None, optional_latent=None):
+    def onestepsample(self, model, lora_name, clip, vae, text, task, per_batch, image=None, optional_latent=None, context: execution_context.ExecutionContext = None):
         pbar = ProgressBar(3)
 
         if optional_latent is None:
@@ -81,7 +85,7 @@ with this node pack.
 
         #load lora
         model_clone = model.clone()
-        lora_path = folder_paths.get_full_path("intrinsic_loras", lora_name)        
+        lora_path = folder_paths.get_full_path(context, "intrinsic_loras", lora_name)
         lora = load_torch_file(lora_path, safe_load=True)
         self.loaded_lora = (lora_path, lora)
 
