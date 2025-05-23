@@ -44,6 +44,8 @@ except ImportError:
     BinaryEventTypes = None
 from concurrent.futures import ThreadPoolExecutor
 
+import execution_context
+
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 class ImagePass:
@@ -170,7 +172,7 @@ https://github.com/hahnec/color-matcher/
             inputs=[
                 io.Image.Input("image_target"),
                 io.Image.Input("image_ref"),
-                io.Combo.Input("method", 
+                io.Combo.Input("method",
                     options=['mkl', 'hm', 'reinhard', 'mvgd', 'hm-mvgd-hm', 'hm-mkl-hm', 'reinhard_lab_gpu'],
                     default='mkl'),
                 io.Float.Input("strength", default=1.0, min=0.0, max=10.0, step=0.01),
@@ -255,7 +257,6 @@ https://github.com/hahnec/color-matcher/
 
 class SaveImageWithAlpha:
     def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
         self.prefix_append = ""
 
@@ -265,7 +266,7 @@ class SaveImageWithAlpha:
                     {"images": ("IMAGE", ),
                     "mask": ("MASK", ),
                     "filename_prefix": ("STRING", {"default": "ComfyUI"})},
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "exec_context": "EXECUTION_CONTEXT"},
                 }
 
     RETURN_TYPES = ()
@@ -276,9 +277,10 @@ class SaveImageWithAlpha:
 Saves an image and mask as .PNG with the mask as the alpha channel. 
 """
 
-    def save_images_alpha(self, images, mask, filename_prefix="ComfyUI_image_with_alpha", prompt=None, extra_pnginfo=None):
+    def save_images_alpha(self, images, mask, filename_prefix="ComfyUI_image_with_alpha", prompt=None, extra_pnginfo=None, exec_context: execution_context.ExecutionContext=None):
         filename_prefix += self.prefix_append
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+        output_dir = folder_paths.get_output_directory(exec_context.user_hash)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir, images[0].shape[1], images[0].shape[0])
         results = list()
         def file_counter():
             max_counter = 0
@@ -304,7 +306,7 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
             a_resized = np.clip(a_resized, 0, 255).astype(np.uint8)
             img.putalpha(Image.fromarray(a_resized, mode='L'))
             metadata = None
-            if not args.disable_metadata:
+            if not args.disable_metadata and not exec_context.disable_pnginfo:
                 metadata = PngInfo()
                 if prompt is not None:
                     metadata.add_text("prompt", json.dumps(prompt))
@@ -319,7 +321,8 @@ Saves an image and mask as .PNG with the mask as the alpha channel.
             results.append({
                 "filename": file,
                 "subfolder": subfolder,
-                "type": self.type
+                "type": self.type,
+                "user_hash": exec_context.user_hash,
             })
 
         return { "ui": { "images": results } }
@@ -598,7 +601,7 @@ Concatenates the 9 input images into a 3x3 grid.
 
 class ImageBatchTestPattern(io.ComfyNode):
     @classmethod
-    def define_schema(cls):
+    def define_schema(cls, exec_context: execution_context.ExecutionContext):
         return io.Schema(
             node_id="ImageBatchTestPattern",
             category="KJNodes/text",
@@ -610,17 +613,20 @@ class ImageBatchTestPattern(io.ComfyNode):
                 io.Int.Input("text_y", default=256, min=0, max=4096, step=1),
                 io.Int.Input("width", default=512, min=16, max=4096, step=1),
                 io.Int.Input("height", default=512, min=16, max=4096, step=1),
-                io.Combo.Input("font", options=folder_paths.get_filename_list("kjnodes_fonts")),
+                io.Combo.Input("font", options=folder_paths.get_filename_list(exec_context, "kjnodes_fonts")),
                 io.Int.Input("font_size", default=255, min=8, max=4096, step=1),
             ],
             outputs=[
                 io.Image.Output(display_name="image"),
             ],
+            hidden= [
+                io.Hidden.exec_context
+            ],
         )
 
     @classmethod
-    def execute(cls, batch_size, font, font_size, start_from, width, height, text_x, text_y) -> io.NodeOutput:
-        font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+    def execute(cls, batch_size, font, font_size, start_from, width, height, text_x, text_y, exec_context: execution_context.ExecutionContext) -> io.NodeOutput:
+        font_path = folder_paths.get_full_path(exec_context, "kjnodes_fonts", font)
         pil_font = ImageFont.truetype(font_path, font_size)
 
         # Probe once whether the '-liga' feature is supported by this PIL build/font
@@ -863,7 +869,7 @@ Can be used for realtime diffusion with autoqueue.
 
 class AddLabel:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
             "image":("IMAGE",),
             "text_x": ("INT", {"default": 10, "min": 0, "max": 4096, "step": 1}),
@@ -872,7 +878,7 @@ class AddLabel:
             "font_size": ("INT", {"default": 32, "min": 0, "max": 4096, "step": 1}),
             "font_color": ("STRING", {"default": "white"}),
             "label_color": ("STRING", {"default": "black"}),
-            "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+            "font": (folder_paths.get_filename_list(context, "kjnodes_fonts"), ),
             "text": ("STRING", {"default": "Text"}),
             "direction": (
             [   'up',
@@ -887,7 +893,10 @@ class AddLabel:
             },
             "optional":{
                 "caption": ("STRING", {"default": "", "forceInput": True}),
-            }
+            },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            },
             }
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "addlabel"
@@ -900,14 +909,14 @@ Fonts are loaded from this folder:
 ComfyUI/custom_nodes/ComfyUI-KJNodes/fonts
 """
 
-    def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction, caption=""):
+    def addlabel(self, image, text_x, text_y, text, height, font_size, font_color, label_color, font, direction, caption="", context: execution_context.ExecutionContext = None):
         batch_size = image.shape[0]
         width = image.shape[2]
         channels = image.shape[3]
         # match the label to the input, so alpha images stay 4 channel
         pil_mode = "RGBA" if channels == 4 else "RGB"
 
-        font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path("kjnodes_fonts", font)
+        font_path = os.path.join(script_directory, "fonts", "TTNorms-Black.otf") if font == "TTNorms-Black.otf" else folder_paths.get_full_path(context, "kjnodes_fonts", font)
 
         # Parse colors using helper function
         font_color_rgb = string_to_color(font_color)
@@ -1477,7 +1486,6 @@ class ImagePrepForICLora:
 
 class ImageAndMaskPreview(SaveImage):
     def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
         self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
         self.compress_level = 4
@@ -1494,7 +1502,7 @@ class ImageAndMaskPreview(SaveImage):
                 "image": ("IMAGE",),
                 "mask": ("MASK",),
             },
-            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
+            "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "user_hash": "USER_HASH"},
         }
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("composite",)
@@ -1509,7 +1517,7 @@ this allows for the preview to be passed for video combine
 nodes for example. Supports RGBA for mask_color to adjust transparency per color.  
 """
 
-    def execute(self, mask_opacity, mask_color, pass_through, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None):
+    def execute(self, mask_opacity, mask_color, pass_through, filename_prefix="ComfyUI", image=None, mask=None, prompt=None, extra_pnginfo=None, user_hash=''):
         if mask is not None and image is None:
             preview = mask.reshape((-1, 1, mask.shape[-2], mask.shape[-1])).movedim(1, -1).expand(-1, -1, -1, 3)
         elif mask is None and image is not None:
@@ -1535,7 +1543,7 @@ nodes for example. Supports RGBA for mask_color to adjust transparency per color
             preview = composite(destination, source.movedim(-1, 1), 0, 0, mask_adjusted, 1, True).movedim(1, -1)
         if pass_through:
             return (preview, )
-        return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo))
+        return(self.save_images(preview, filename_prefix, prompt, extra_pnginfo, user_hash=user_hash))
 
 def crossfade(images_1, images_2, alpha):
     crossfade = (1 - alpha) * images_1 + alpha * images_2
@@ -2018,7 +2026,7 @@ class RandomImageFromBatch(io.ComfyNode):
         return io.Schema(
             node_id="RandomImageFromBatch",
             display_name="Random Image From Batch",
-            search_aliases=["random", "mask", "sequence", "frame"],
+            # search_aliases=["random", "mask", "sequence", "frame"],
             category="KJNodes/image",
             description="Picks a sequence of frames from an image or mask batch within a selected index range. "
                         "At randomness=0 the picks are evenly spaced across the range; at randomness=1 they are "
@@ -2719,7 +2727,7 @@ class ImageConcatMulti(io.ComfyNode):
                 "Set the input count and click 'Update inputs' to add more slots.\n"
                 "The output type follows image_1; other inputs are converted to match."
             ),
-            accept_all_inputs=True, # JS dynamically adds image_3..image_N beyond the declared inputs
+            # accept_all_inputs=True, # JS dynamically adds image_3..image_N beyond the declared inputs
             inputs=[
                 io.Int.Input("inputcount", default=2, min=2, max=1000, step=1),
                 io.MatchType.Input("image_1", template=type_template),
@@ -2751,7 +2759,6 @@ class ImageConcatMulti(io.ComfyNode):
 
 class PreviewAnimation:
     def __init__(self):
-        self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
         self.prefix_append = "_temp_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
         self.compress_level = 1
@@ -2763,6 +2770,9 @@ class PreviewAnimation:
                     {
                      "fps": ("FLOAT", {"default": 8.0, "min": 0.01, "max": 1000.0, "step": 0.01}),
                      },
+                "hidden": {
+                    "user_hash": "USER_HASH"
+                    },
                 "optional": {
                     "images": ("IMAGE", ),
                     "masks": ("MASK", ),
@@ -2774,9 +2784,10 @@ class PreviewAnimation:
     OUTPUT_NODE = True
     CATEGORY = "KJNodes/image"
 
-    def preview(self, fps, images=None, masks=None):
+    def preview(self, fps, images=None, masks=None, user_hash:str=""):
+        output_dir = folder_paths.get_temp_directory(user_hash)
         filename_prefix = "AnimPreview"
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
         results = list()
 
         pil_images = []
@@ -2826,7 +2837,8 @@ class PreviewAnimation:
             results.append({
                 "filename": file,
                 "subfolder": subfolder,
-                "type": self.type
+                "type": self.type,
+                "user_hash": user_hash,
             })
             counter += 1
 
@@ -3202,8 +3214,8 @@ highest dimension.
 class LoadAndResizeImage:
     _color_channels = ["alpha", "red", "green", "blue"]
     @classmethod
-    def INPUT_TYPES(s):
-        input_dir = folder_paths.get_input_directory()
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
+        input_dir = folder_paths.get_input_directory(context.user_hash)
         files = [f.name for f in pathlib.Path(input_dir).iterdir() if f.is_file()]
         return {"required":
                     {
@@ -3214,9 +3226,13 @@ class LoadAndResizeImage:
                     "repeat": ("INT", { "default": 1, "min": 1, "max": 4096, "step": 1, }),
                     "keep_proportion": ("BOOLEAN", { "default": False }),
                     "divisible_by": ("INT", { "default": 2, "min": 0, "max": 512, "step": 1, }),
-                    "mask_channel": (s._color_channels, {"tooltip": "Channel to use for the mask output"}), 
+                    "mask_channel": (s._color_channels, {"tooltip": "Channel to use for the mask output"}),
                     "background_color": ("STRING", { "default": "", "tooltip": "Fills the alpha channel with the specified color."}),
                     },
+                "hidden":
+                    {
+                    "context": "EXECUTION_CONTEXT"
+                    }
                 }
 
     CATEGORY = "KJNodes/image"
@@ -3224,8 +3240,8 @@ class LoadAndResizeImage:
     RETURN_NAMES = ("image", "mask", "width", "height","image_path",)
     FUNCTION = "load_image"
 
-    def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel, background_color):
-        image_path = folder_paths.get_annotated_filepath(image)
+    def load_image(self, image, resize, width, height, repeat, keep_proportion, divisible_by, mask_channel, background_color, context: execution_context.ExecutionContext):
+        image_path = folder_paths.get_annotated_filepath(image, context.user_hash)
 
         img = node_helpers.pillow(Image.open, image_path)
         img = ImageOps.exif_transpose(img)
@@ -3338,8 +3354,8 @@ class LoadAndResizeImage:
     #     return m.digest().hex()
 
     @classmethod
-    def VALIDATE_INPUTS(s, image):
-        if not folder_paths.exists_annotated_filepath(image):
+    def VALIDATE_INPUTS(s, image, context: execution_context.ExecutionContext):
+        if not folder_paths.exists_annotated_filepath(image, context.user_hash):
             return "Invalid image file: {}".format(image)
 
         return True
@@ -3411,6 +3427,9 @@ class LoadImagesFromFolderKJ:
                 "image_load_cap": ("INT", {"default": 0, "min": 0, "step": 1}),
                 "start_index": ("INT", {"default": 0, "min": 0, "step": 1}),
                 "include_subfolders": ("BOOLEAN", {"default": False}),
+            },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT",
             }
         }
 
@@ -3420,7 +3439,7 @@ class LoadImagesFromFolderKJ:
     CATEGORY = "KJNodes/image"
     DESCRIPTION = """Loads images from a folder into a batch, images are resized and loaded into a batch."""
 
-    def load_images(self, folder, width, height, image_load_cap, start_index, keep_aspect_ratio, include_subfolders=False):    
+    def load_images(self, folder, width, height, image_load_cap, start_index, keep_aspect_ratio, include_subfolders=False):
         if folder and not os.path.isabs(folder) and args.base_directory:
             folder = os.path.join(args.base_directory, folder)
         if not folder or not os.path.isdir(folder):
@@ -3616,7 +3635,7 @@ class ImageGridtoBatch:
         return (img_tensor,)
 
 class SaveImageKJ:
-    def __init__(self):
+    def __init__(self, context: execution_context.ExecutionContext):
         self.type = "output"
         self.prefix_append = ""
         self.compress_level = 4
@@ -3627,14 +3646,13 @@ class SaveImageKJ:
             "required": {
                 "images": ("IMAGE", {"tooltip": "The images to save."}),
                 "filename_prefix": ("STRING", {"default": "ComfyUI", "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes."}),
-                "output_folder": ("STRING", {"default": "output", "tooltip": "The folder to save the images to."}),
             },
             "optional": {
                 "caption_file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the caption file. Limited to plain-text/data formats."}),
                 "caption": ("STRING", {"forceInput": True, "tooltip": "string to save as .txt file"}),
             },
             "hidden": {
-                "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"
+                "prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "context": "EXECUTION_CONTEXT"
             },
         }
 
@@ -3647,17 +3665,10 @@ class SaveImageKJ:
     CATEGORY = "KJNodes/image"
     DESCRIPTION = "Saves the input images to your ComfyUI output directory."
 
-    def save_images(self, images, output_folder, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt"):
+    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, context: execution_context.ExecutionContext=None, caption=None, caption_file_extension=".txt"):
         filename_prefix += self.prefix_append
-
-        if os.path.isabs(output_folder):
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder, exist_ok=True)
-            full_output_folder = output_folder
-            _, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_folder, images[0].shape[1], images[0].shape[0])
-        else:
-            self.output_dir = folder_paths.get_output_directory()
-            full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir, images[0].shape[1], images[0].shape[0])
+        output_dir = folder_paths.get_output_directory(context.user_hash)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir, images[0].shape[1], images[0].shape[0])
 
         # sanitize caption extension: strip path components so it can't traverse out of the chosen folder, and allowlist to text/data formats
         if caption is not None:
@@ -3672,7 +3683,7 @@ class SaveImageKJ:
             i = 255. * image.cpu().numpy()
             img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
             metadata = None
-            if not args.disable_metadata:
+            if not args.disable_metadata and not context.disable_pnginfo:
                 metadata = PngInfo()
                 if prompt is not None:
                     metadata.add_text("prompt", json.dumps(prompt))
@@ -3687,7 +3698,8 @@ class SaveImageKJ:
             results.append({
                 "filename": file,
                 "subfolder": subfolder,
-                "type": self.type
+                "type": self.type,
+                "user_hash": context.user_hash,
             })
             if caption is not None:
                 txt_file = base_file_name + caption_file_extension
@@ -3706,7 +3718,6 @@ class SaveStringKJ:
     ALLOWED_EXTENSIONS = [".txt", ".caption", ".json", ".yaml", ".yml", ".md", ".csv", ".tsv", ".xml", ".log", ".ini", ".toml"]
 
     def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
         self.prefix_append = ""
 
@@ -3721,6 +3732,9 @@ class SaveStringKJ:
             "optional": {
                 "file_extension": ("STRING", {"default": ".txt", "tooltip": "The extension for the saved file. Limited to plain-text/data formats."}),
             },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT",
+            }
         }
 
     RETURN_TYPES = ("STRING",)
@@ -3732,10 +3746,11 @@ class SaveStringKJ:
     CATEGORY = "KJNodes/misc"
     DESCRIPTION = "Saves the input string to your ComfyUI output directory."
 
-    def save_string(self, string, output_folder, filename_prefix="text", file_extension=".txt"):
+    def save_string(self, string, output_folder, filename_prefix="text", file_extension=".txt", context: execution_context.ExecutionContext=None):
+        output_dir = folder_paths.get_output_directory(context.user_hash)
         filename_prefix += self.prefix_append
 
-        output_dir = os.path.abspath(self.output_dir)
+        output_dir = os.path.abspath(output_dir)
         if output_folder and output_folder != "output":
             sub = os.path.splitdrive(output_folder)[1].replace("\\", "/").lstrip("/")
             target_dir = os.path.abspath(os.path.join(output_dir, sub))
@@ -3870,11 +3885,14 @@ class FastPreviewBatch(io.ComfyNode):
                 io.Int.Input("max_grid_frames", default=1024, min=1, max=4096, step=1,
                              tooltip="If batch exceeds this, frames are stride-sampled evenly."),
             ],
+            hidden=[
+                io.Hidden.exec_context,
+            ],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, input, max_thumb_size, crf, max_grid_frames) -> io.NodeOutput:
+    def execute(cls, input, max_thumb_size, crf, max_grid_frames, exec_context: execution_context.ExecutionContext) -> io.NodeOutput:
         import av
         import threading
         import queue as _queue
@@ -3904,7 +3922,7 @@ class FastPreviewBatch(io.ComfyNode):
         strip_w = max(2, int(round(new_w * strip_scale)))
         strip_h = max(2, int(round(new_h * strip_scale)))
 
-        output_dir = folder_paths.get_temp_directory()
+        output_dir = folder_paths.get_temp_directory(user_hash=exec_context.user_hash)
         prefix = "kj_batch_preview_" + ''.join(random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(6))
         full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
             prefix, output_dir, new_w, new_h
@@ -4062,7 +4080,7 @@ class ImageCropByMaskAndResize:
         # Calculate maximum possible padding for each direction
         max_padding_x = min((w0 - width) // 2, padding)
         max_padding_y = min((h0 - height) // 2, padding)
-        
+
         # Apply constrained padding
         final_width = width + 2 * max_padding_x
         final_height = height + 2 * max_padding_y
@@ -4119,7 +4137,7 @@ class ImageCropByMaskAndResize:
         # Step 3: Process each image with uniform crop size
         for i in range(image.shape[0]):
             orig_x0, orig_y0, orig_w, orig_h = bbox_params[i]
-            
+
             # Calculate center of original bounding box
             x_center = orig_x0 + orig_w / 2
             y_center = orig_y0 + orig_h / 2
@@ -4583,7 +4601,8 @@ class LoadVideosFromFolder:
             },
             "hidden": {
                 "force_size": "STRING",
-                "unique_id": "UNIQUE_ID"
+                "unique_id": "UNIQUE_ID",
+                "context": "EXECUTION_CONTEXT",
             },
         }
 
@@ -4682,8 +4701,9 @@ class LoadVideosFromFolder:
 
     @classmethod
     def IS_CHANGED(s, video, **kwargs):
+        context: execution_context.ExecutionContext = kwargs["context"]
         if s.vhs_nodes is not None:
-            return s.vhs_nodes.utils.hash_path(video)
+            return s.vhs_nodes.utils.hash_path(video, context.user_hash)
         return None
 
 
@@ -4714,7 +4734,7 @@ class EncodeVideoComponents(io.ComfyNode):
         ]
         return io.Schema(
             node_id="EncodeVideoComponents",
-            search_aliases=["video to latent", "encode video", "vae encode video"],
+            # search_aliases=["video to latent", "encode video", "vae encode video"],
             display_name="Encode Video Components",
             category="KJNodes/image",
             description="Extracts video frames, resizes them, and encodes with a VAE directly, avoiding storing the full image tensor.",
@@ -4962,7 +4982,7 @@ class DecodeAndSaveVideo(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="DecodeAndSaveVideo",
-            search_aliases=["video to latent", "decode video"],
+            # search_aliases=["video to latent", "decode video"],
             display_name="Decode and Save Video",
             category="KJNodes/image",
             description="Decodes video frames and audio from latent representations, combines them, and saves as a video file, without keeping intermediate images in memory.",
@@ -4985,12 +5005,12 @@ class DecodeAndSaveVideo(io.ComfyNode):
                     ]),
                 ]),
             ],
-            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo, io.Hidden.exec_context],
             is_output_node=True,
         )
 
     @classmethod
-    def execute(cls, video_latent, video_vae, filename_prefix, format, codec, tiling, audio_latent=None, audio_vae=None, fps=25.0) -> io.NodeOutput:
+    def execute(cls, video_latent, video_vae, filename_prefix, format, codec, tiling, audio_latent=None, audio_vae=None, fps=25.0, exec_context: execution_context.ExecutionContext=None) -> io.NodeOutput:
         if tiling["tiling"] == "enabled":
             tile_size = tiling["tile_size"]
             overlap = tiling["overlap"]
@@ -5030,7 +5050,7 @@ class DecodeAndSaveVideo(io.ComfyNode):
             audio = None
 
         video = InputImpl.VideoFromComponents(Types.VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps)))
-        file, subfolder = cls.save_video(video, filename_prefix, format, codec)
+        file, subfolder = cls.save_video(video, filename_prefix, format, codec, exec_context=exec_context)
 
         return io.NodeOutput(ui=ui.PreviewVideo([ui.SavedResult(file, subfolder, io.FolderType.output)]))
 
@@ -5113,16 +5133,16 @@ class DecodeAndSaveVideo(io.ComfyNode):
         return {"waveform": audio, "sample_rate": int(output_audio_sample_rate)}
 
     @classmethod
-    def save_video(cls, video, filename_prefix, format, codec) -> io.NodeOutput:
+    def save_video(cls, video, filename_prefix, format, codec, exec_context: execution_context.ExecutionContext) -> io.NodeOutput:
         width, height = video.get_dimensions()
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(
             filename_prefix,
-            folder_paths.get_output_directory(),
+            folder_paths.get_output_directory(user_hash=exec_context.user_hash),
             width,
             height
         )
         saved_metadata = None
-        if not args.disable_metadata:
+        if not args.disable_metadata and not exec_context.disable_pnginfo:
             metadata = {}
             if cls.hidden.extra_pnginfo is not None:
                 metadata.update(cls.hidden.extra_pnginfo)
@@ -5148,7 +5168,7 @@ class PreviewImageOrMask(io.ComfyNode):
             display_name="Preview Image Or Mask",
             category="KJNodes/misc",
             description="Previews the input images or masks.",
-            search_aliases=["output"],
+            # search_aliases=["output"],
             inputs=[
                 io.MultiType.Input("input", [io.Image, io.Mask], tooltip="The image or mask to preview."),
             ],

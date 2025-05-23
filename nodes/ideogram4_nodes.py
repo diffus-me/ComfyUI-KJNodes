@@ -234,7 +234,7 @@ class Ideogram4PromptBuilderKJ(io.ComfyNode):
             node_id="Ideogram4PromptBuilderKJ",
             display_name="Ideogram 4 Prompt Builder KJ",
             category="KJNodes/text",
-            search_aliases=["ideogram", "caption", "bbox", "prompt builder", "json prompt"],
+            # search_aliases=["ideogram", "caption", "bbox", "prompt builder", "json prompt"],
             is_experimental=True,
             description="""
 Visual prompt builder for Ideogram 4's structured JSON caption format.

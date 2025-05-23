@@ -16,6 +16,8 @@ import comfy.utils
 import comfy.sd
 import comfy.ops
 
+import execution_context
+
 try:
     from comfy_api.latest import io
     v3_available = True
@@ -233,14 +235,16 @@ class PatchFlashAttentionKJ():
 
 class CheckpointLoaderKJ():
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
-            "ckpt_name": (folder_paths.get_filename_list("checkpoints"), {"tooltip": "The name of the checkpoint (model) to load."}),
+            "ckpt_name": (folder_paths.get_filename_list(context, "checkpoints"), {"tooltip": "The name of the checkpoint (model) to load."}),
             "weight_dtype": (["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2", "fp16", "bf16", "fp32"],),
             "compute_dtype": (["default", "fp16", "bf16", "fp32"], {"default": "default", "tooltip": "The compute dtype to use for the model."}),
             "patch_cublaslinear": ("BOOLEAN", {"default": False, "tooltip": "Enable or disable the cublas_ops arg"}),
             "sage_attention": (sageattn_modes, {"default": False, "tooltip": "Patch comfy attention to use sageattn."}),
             "enable_fp16_accumulation": ("BOOLEAN", {"default": False, "tooltip": "Enable torch.backends.cuda.matmul.allow_fp16_accumulation, required minimum pytorch version 2.7.1"}),
+        },"hidden": {
+            "context": "EXECUTION_CONTEXT"
         }}
 
     RETURN_TYPES = ("MODEL", "CLIP", "VAE")
@@ -249,7 +253,7 @@ class CheckpointLoaderKJ():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/model_loaders"
 
-    def load(self, ckpt_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation):
+    def load(self, ckpt_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation, context: execution_context.ExecutionContext):
         DTYPE_MAP = {
             "fp8_e4m3fn": torch.float8_e4m3fn,
             "fp8_e5m2": torch.float8_e5m2,
@@ -271,7 +275,7 @@ class CheckpointLoaderKJ():
         else:
             args.fast.discard("cublas_ops")
 
-        ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
+        ckpt_path = folder_paths.get_full_path_or_raise(context, "checkpoints", ckpt_name)
         model, clip, vae, _ = comfy.sd.load_checkpoint_guess_config(
             ckpt_path,
             output_vae=True,
@@ -306,11 +310,13 @@ class CheckpointLoaderKJ():
 
 class DiffusionModelSelector():
     @classmethod
-    def INPUT_TYPES(s):
-        ltx2_connector_models = folder_paths.get_filename_list("text_encoders")
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
+        ltx2_connector_models = folder_paths.get_filename_list(context, "text_encoders")
         ltx2_connector_models = [m for m in ltx2_connector_models if "connector" in m.lower()]
         return {"required": {
-            "model_name": (folder_paths.get_filename_list("diffusion_models") + ltx2_connector_models, {"tooltip": "The name of the checkpoint (model) to load."}),
+            "model_name": (folder_paths.get_filename_list(context, "diffusion_models") + ltx2_connector_models, {"tooltip": "The name of the checkpoint (model) to load."}),
+        },"hidden": {
+                "context": "EXECUTION_CONTEXT",
         },
         }
 
@@ -321,11 +327,11 @@ class DiffusionModelSelector():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/model_loaders"
 
-    def get_path(self, model_name):
+    def get_path(self, model_name, context: execution_context.ExecutionContext):
         if "connector" in model_name.lower():
-            model_path = folder_paths.get_full_path_or_raise("text_encoders", model_name)
+            model_path = folder_paths.get_full_path_or_raise(execution_context, "text_encoders", model_name)
         else:
-            model_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+            model_path = folder_paths.get_full_path_or_raise(context, "diffusion_models", model_name)
         return (model_path,)
 
 def _load_diffusion_model_kj(unet_path, model_options=None, extra_state_dict=None, disable_dynamic=False):
@@ -352,9 +358,9 @@ def _load_diffusion_model_kj(unet_path, model_options=None, extra_state_dict=Non
 
 class DiffusionModelLoaderKJ():
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
-            "model_name": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load."}),
+            "model_name": (folder_paths.get_filename_list(context, "diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load."}),
             "weight_dtype": (["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2", "fp16", "bf16", "fp32"],),
             "compute_dtype": (["default", "fp16", "bf16", "fp32"], {"default": "default", "tooltip": "The compute dtype to use for the model."}),
             "patch_cublaslinear": ("BOOLEAN", {"default": False, "tooltip": "Enable or disable the cublas_ops arg"}),
@@ -363,6 +369,9 @@ class DiffusionModelLoaderKJ():
         },
         "optional": {
             "extra_state_dict": ("STRING", {"forceInput": True, "tooltip": "The full path to an additional state dict to load, this will be merged with the main state dict. Useful for example to add VACE module to a WanVideoModel. You can use DiffusionModelSelector to easily get the path."}),
+        },
+        "hidden": {
+            "context": "EXECUTION_CONTEXT"
         }
         }
 
@@ -372,7 +381,7 @@ class DiffusionModelLoaderKJ():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/model_loaders"
 
-    def patch_and_load(self, model_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation, extra_state_dict=None):
+    def patch_and_load(self, model_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation, extra_state_dict=None, context: execution_context.ExecutionContext=None):
         DTYPE_MAP = {
             "fp8_e4m3fn": torch.float8_e4m3fn,
             "fp8_e5m2": torch.float8_e5m2,
@@ -403,7 +412,7 @@ class DiffusionModelLoaderKJ():
         else:
             args.fast.discard("cublas_ops")
 
-        unet_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+        unet_path = folder_paths.get_full_path_or_raise(context, "diffusion_models", model_name)
 
         model = _load_diffusion_model_kj(unet_path, model_options=model_options, extra_state_dict=extra_state_dict)
         if dtype := DTYPE_MAP.get(compute_dtype):
@@ -571,7 +580,7 @@ class TorchCompileModelWanVideoV2:
             else:
                 compile_key_list =["diffusion_model"]
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
         except Exception as e:
             raise RuntimeError("Failed to compile model") from e
 
@@ -1587,11 +1596,11 @@ class CFGZeroStarAndInit:
 
 class GGUFLoaderKJ(io.ComfyNode):
     @classmethod
-    def define_schema(cls):
+    def define_schema(cls, exec_context: execution_context.ExecutionContext):
         # Get GGUF models safely, fallback to empty list if unet_gguf folder doesn't exist
         try:
-            gguf_models = folder_paths.get_filename_list("unet_gguf")
-            ltx2_connector_models = folder_paths.get_filename_list("text_encoders")
+            gguf_models = folder_paths.get_filename_list(exec_context, "unet_gguf")
+            ltx2_connector_models = folder_paths.get_filename_list(exec_context, "text_encoders")
             ltx2_connector_models = [m for m in ltx2_connector_models if "connector" in m.lower()]
         except KeyError:
             gguf_models = []
@@ -1613,6 +1622,9 @@ class GGUFLoaderKJ(io.ComfyNode):
 
             ],
             outputs=[io.Model.Output(),],
+            hidden=[
+                io.Hidden.exec_context
+            ]
         )
 
     def attention_override_pytorch(func, *args, **kwargs):
@@ -1658,7 +1670,7 @@ class GGUFLoaderKJ(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation):
+    def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation, exec_context: execution_context.ExecutionContext):
         gguf_nodes = cls._get_gguf_module()
         ops = gguf_nodes.ops.GGMLOps()
 
@@ -1675,7 +1687,7 @@ class GGUFLoaderKJ(io.ComfyNode):
 
         # init model
         extra = {}
-        model_path = folder_paths.get_full_path("unet", model_name)
+        model_path = folder_paths.get_full_path(exec_context, "unet", model_name)
         try:
             sd, extra = gguf_nodes.loader.gguf_sd_loader(model_path)
         except TypeError:
@@ -1683,13 +1695,13 @@ class GGUFLoaderKJ(io.ComfyNode):
 
         if extra_model_name is not None and extra_model_name != "none":
             if extra_model_name.endswith(".gguf"):
-                extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
+                extra_model_full_path = folder_paths.get_full_path(exec_context, "unet", extra_model_name)
                 try:
                     extra_model, _ = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
                 except TypeError:
                     extra_model = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
             elif "connector" in extra_model_name.lower():
-                extra_model_full_path = folder_paths.get_full_path("text_encoders", extra_model_name)
+                extra_model_full_path = folder_paths.get_full_path(exec_context, "text_encoders", extra_model_name)
                 extra_model = comfy.utils.load_torch_file(extra_model_full_path)
                 diffusion_model_prefix = comfy.model_detection.unet_prefix_from_state_dict(extra_model)
                 if diffusion_model_prefix == "model.diffusion_model.":
@@ -1950,6 +1962,7 @@ class VisualizeCUDAMemoryHistory():
         },
          "hidden": {
                 "unique_id": "UNIQUE_ID",
+                "context": "EXECUTION_CONTEXT",
             },
         }
 
@@ -1960,12 +1973,12 @@ class VisualizeCUDAMemoryHistory():
     DESCRIPTION = "Visualizes a CUDA memory allocation history file, opens in browser"
     OUTPUT_NODE = True
 
-    def visualize(self, snapshot_path, unique_id):
+    def visualize(self, snapshot_path, unique_id, context: execution_context.ExecutionContext):
         from torch.cuda import _memory_viz
         import uuid
 
         from folder_paths import get_output_directory
-        output_dir = get_output_directory()
+        output_dir = get_output_directory(user_hash=context.user_hash)
 
         with open(snapshot_path, "rb") as f:
             snapshot = _safe_load_cuda_snapshot(f)

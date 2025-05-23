@@ -7,6 +7,7 @@ import json
 
 from PIL import Image
 
+import execution_context
 from comfy.utils import common_upscale
 from comfy_api.latest import io
 import folder_paths
@@ -100,7 +101,7 @@ class ImageTransformKJ(io.ComfyNode):
             node_id="ImageTransformKJ",
             display_name="Image Transform KJ",
             category="KJNodes/image",
-            search_aliases=["resize", "crop", "pad", "upscale", "keep proportion", "bbox", "bounding box", "transform", "rotate", "mirror"],
+            # search_aliases=["resize", "crop", "pad", "upscale", "keep proportion", "bbox", "bounding box", "transform", "rotate", "mirror"],
             is_experimental=True,
             description="""
 Interactive image transform node: crop, resize, pad, and rotate.  
@@ -182,12 +183,15 @@ Use extra_padding to add padding with color or edge fill (clamp/repeat/mirror)."
                 io.Int.Output("width", display_name="width", tooltip="Width of the output image."),
                 io.Int.Output("height", display_name="height", tooltip="Height of the output image."),
             ],
+            hidden=[
+                io.Hidden.exec_context
+            ]
         )
 
 
     @classmethod
     def execute(cls, image, target_width, target_height, upscale_method, keep_proportion, divisible_by,
-                extra_padding, invert_crop, bboxes, mask=None):
+                extra_padding, invert_crop, bboxes, mask=None, exec_context: execution_context.ExecutionContext = None) -> io.NodeOutput:
         # Unpack DynamicCombos
         edge_mode = keep_proportion.get("edge_mode", "clamp")
         pad_x = keep_proportion.get("pad_x", 0.5)
@@ -221,7 +225,7 @@ Use extra_padding to add padding with color or edge fill (clamp/repeat/mirror)."
             image = image.unsqueeze(-1).repeat(1, 1, 1, 3)
 
         # Save input image as temp preview file for JS canvas
-        temp_dir = folder_paths.get_temp_directory()
+        temp_dir = folder_paths.get_temp_directory(user_hash=exec_context.user_hash)
         pil_img = Image.fromarray((image[0].cpu().numpy() * 255).astype(np.uint8))
         preview_filename = f"crop_preview_{random.randint(0, 0xFFFFFF):06x}.webp"
         pil_img.save(os.path.join(temp_dir, preview_filename), format="WEBP", quality=80)

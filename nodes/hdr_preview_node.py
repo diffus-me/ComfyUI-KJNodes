@@ -3,6 +3,8 @@ import random
 
 import torch
 from PIL import Image
+
+import execution_context
 from comfy_api.latest import io
 import comfy.model_management as mm
 import folder_paths
@@ -77,11 +79,14 @@ class HDRPreviewKJ(io.ComfyNode):
                 io.Image.Output(display_name="image",
                     tooltip="Tonemapped sRGB image, ready for preview/save."),
             ],
+            hidden=[
+                io.Hidden.exec_context
+            ]
         )
 
     @classmethod
-    def execute(cls, image: torch.Tensor, exposure: float = 0.0, saturation: float = 1.0, fps: float = 24.0, input_space: str = "logc3") -> io.NodeOutput:
-        temp_dir = folder_paths.get_temp_directory()
+    def execute(cls, image: torch.Tensor, exposure: float = 0.0, saturation: float = 1.0, fps: float = 24.0, input_space: str = "logc3", exec_context: execution_context.ExecutionContext = None) -> io.NodeOutput:
+        temp_dir = folder_paths.get_temp_directory(user_hash=exec_context.user_hash)
         os.makedirs(temp_dir, exist_ok=True)
         prefix = f"hdrprv_{random.randint(0, 0xFFFFFF):06x}"
 

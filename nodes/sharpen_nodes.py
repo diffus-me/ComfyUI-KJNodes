@@ -11,7 +11,7 @@ class ImageSharpenKJ(io.ComfyNode):
             node_id="ImageSharpenKJ",
             category="KJNodes/image",
             display_name="Image Sharpen KJ",
-            search_aliases=["sharpen", "unsharp mask", "deconvolution", "cas", "rcas", "high-pass", "postprocessing"],
+            # search_aliases=["sharpen", "unsharp mask", "deconvolution", "cas", "rcas", "high-pass", "postprocessing"],
             description="""GPU-accelerated image sharpening with multiple methods.
 
 **RCAS** — AMD's Robust Contrast-Adaptive Sharpening (from FSR).

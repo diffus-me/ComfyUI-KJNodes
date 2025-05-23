@@ -1,6 +1,7 @@
 import torch
 import comfy.model_management
 import comfy.utils
+import execution_context
 import folder_paths
 import os
 import logging
@@ -183,17 +184,20 @@ class LoraExtractKJ(io.ComfyNode):
                 io.Float.Input("adaptive_param", default=0.15, min=0.0, max=1.0, step=0.01, tooltip="For ratio mode, this is the ratio of the maximum singular value. For quantile mode, this is the quantile of the singular values. For fro mode, this is the Frobenius norm retention ratio."),
                 io.Boolean.Input("clamp_quantile", default=False),
             ],
+            hidden=[
+                io.Hidden.exec_context
+            ]
         )
 
 
     @classmethod
-    def execute(cls, finetuned, original, filename_prefix, rank, lora_type, algorithm, lowrank_iters, output_dtype, bias_diff, adaptive_param, clamp_quantile) -> io.NodeOutput:
+    def execute(cls, finetuned, original, filename_prefix, rank, lora_type, algorithm, lowrank_iters, output_dtype, bias_diff, adaptive_param, clamp_quantile, exec_context: execution_context.ExecutionContext) -> io.NodeOutput:
         if algorithm == "svd_lowrank" and lora_type != "standard":
             raise ValueError("svd_lowrank algorithm is only supported for standard LoRA extraction.")
 
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[output_dtype]
 
-        output_dir = folder_paths.get_output_directory()
+        output_dir = folder_paths.get_output_directory(user_hash=exec_context.user_hash)
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
 
         output_sd = {}
@@ -224,7 +228,7 @@ class LoraExtractKJ(io.ComfyNode):
 
 class LoraReduceRank(io.ComfyNode):
     @classmethod
-    def define_schema(cls):
+    def define_schema(cls, exec_context: execution_context.ExecutionContext) -> io.Schema:
         return io.Schema(
             node_id="LoraReduceRankKJ",
             display_name="LoraReduceRank",
@@ -233,18 +237,21 @@ class LoraReduceRank(io.ComfyNode):
             is_output_node=True,
             is_experimental=True,
             inputs=[
-                io.Combo.Input("lora_name", options=folder_paths.get_filename_list("loras"), tooltip="The name of the LoRA."),
+                io.Combo.Input("lora_name", options=folder_paths.get_filename_list(exec_context, "loras"), tooltip="The name of the LoRA."),
                 io.Int.Input("new_rank", default=8, min=1, max=4096, step=1, tooltip="The new rank to resize the LoRA. Acts as max rank when using dynamic_method."),
                 io.Combo.Input("dynamic_method", options=["disabled", "sv_ratio", "sv_cumulative", "sv_fro", "sv_knee"], default="disabled", tooltip="Method to use for dynamically determining new alphas and dims. sv_knee finds the elbow point in the singular value curve."),
                 io.Float.Input("dynamic_param", default=0.2, min=0.0, max=2.0, step=0.01, tooltip="Parameter for dynamic methods. For sv_knee: sensitivity (1.0=standard knee, <1.0=more aggressive/lower rank, >1.0=more conservative)."),
                 io.Combo.Input("output_dtype", options=["match_original", "fp16", "bf16", "fp32"], default="match_original", tooltip="Data type to save the LoRA as."),
                 io.Boolean.Input("verbose", default=True),
             ],
+            hidden=[
+                io.Hidden.exec_context
+            ]
         )
 
     @classmethod
-    def execute(cls, lora_name, new_rank, dynamic_method, dynamic_param, output_dtype, verbose) -> io.NodeOutput:
-        lora_path = folder_paths.get_full_path("loras", lora_name)
+    def execute(cls, lora_name, new_rank, dynamic_method, dynamic_param, output_dtype, verbose, exec_context: execution_context.ExecutionContext) -> io.NodeOutput:
+        lora_path = folder_paths.get_full_path(exec_context, "loras", lora_name)
         lora_sd, metadata = comfy.utils.load_torch_file(lora_path, return_metadata=True)
 
         if output_dtype == "fp16":
@@ -283,9 +290,10 @@ class LoraReduceRank(io.ComfyNode):
             if type(value) == torch.Tensor and value.dtype.is_floating_point and value.dtype != save_dtype:
                 output_sd[key] = value.to(save_dtype)
 
-        output_dir = folder_paths.get_output_directory()
+        output_dir = folder_paths.get_output_directory(exec_context.user_hash)
         output_filename_prefix = "loras/" + lora_name
 
+        output_dir = folder_paths.get_output_directory(exec_context.user_hash)
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(output_filename_prefix, output_dir)
         output_dtype_str = f"_{output_dtype}" if output_dtype != "match_original" else ""
         average_rank = str(int(np.mean(rank_list)))
