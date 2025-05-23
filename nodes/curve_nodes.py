@@ -10,6 +10,8 @@ import base64
 from io import BytesIO
 
 
+import execution_context
+
 def parse_color(color):
     if isinstance(color, str) and ',' in color:
         return tuple(int(c.strip()) for c in color.split(','))
@@ -542,14 +544,14 @@ Locations are center locations.
 """
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": {
                 "coordinates": ("STRING", {"forceInput": True}),
                 "text": ("STRING", {"default": 'text', "multiline": True}),
                 "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                 "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
-                "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+                "font": (folder_paths.get_filename_list(context, "kjnodes_fonts"), ),
                 "font_size": ("INT", {"default": 42}),
                  "alignment": (
                 [   'left',
@@ -562,10 +564,13 @@ Locations are center locations.
         },
         "optional": {
             "size_multiplier": ("FLOAT", {"default": [1.0], "forceInput": True}),
-        }
+        },
+        "hidden": {
+            "context": "EXECUTION_CONTEXT"
+        },
     } 
 
-    def createtextmask(self, coordinates, frame_width, frame_height, font, font_size, text, text_color, alignment, size_multiplier=[1.0]):
+    def createtextmask(self, coordinates, frame_width, frame_height, font, font_size, text, text_color, alignment, size_multiplier=[1.0], context: execution_context.ExecutionContext = None):
         coordinates = coordinates.replace("'", '"')
         coordinates = json.loads(coordinates)
 
@@ -573,7 +578,7 @@ Locations are center locations.
         mask_list = []
         image_list = []
         color = parse_color(text_color)
-        font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+        font_path = folder_paths.get_full_path(context, "kjnodes_fonts", font)
 
         if len(size_multiplier) != batch_size:
             size_multiplier = size_multiplier * (batch_size // len(size_multiplier)) + size_multiplier[:batch_size % len(size_multiplier)]
@@ -1338,26 +1343,29 @@ CreateInstanceDiffusionTracking -node.
 """
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": {
                 "image": ("IMAGE", ),
                 "tracking": ("TRACKING", {"forceInput": True}),
                 "box_line_width": ("INT", {"default": 2, "min": 1, "max": 10, "step": 1}),
                 "draw_text": ("BOOLEAN", {"default": True}),
-                "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+                "font": (folder_paths.get_filename_list(context, "kjnodes_fonts"), ),
                 "font_size": ("INT", {"default": 20}),
         },
-    } 
+        "hidden": {
+            "context": "EXECUTION_CONTEXT"
+        },
+    }
 
-    def draw(self, image, tracking, box_line_width, draw_text, font, font_size):
+    def draw(self, image, tracking, box_line_width, draw_text, font, font_size, context: execution_context.ExecutionContext):
         import matplotlib.cm as cm
 
         modified_images = []
         
         colormap = cm.get_cmap('rainbow', len(tracking))
         if draw_text:
-            font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+            font_path = folder_paths.get_full_path(context, "kjnodes_fonts", font)
             font = ImageFont.truetype(font_path, font_size)
 
         # Iterate over each image in the batch

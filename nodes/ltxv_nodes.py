@@ -1,3 +1,4 @@
+import execution_context
 from comfy_extras.nodes_lt import get_noise_mask, LTXVAddGuide
 import types
 import math
@@ -876,7 +877,7 @@ class OuterSampleAudioNormalizationWrapper:
     def __init__(self, audio_normalization_factors):
         self.audio_normalization_factors = audio_normalization_factors
 
-    def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
+    def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes, context: execution_context.ExecutionContext):
         guider = executor.class_obj
         ltxav = guider.model_patcher.model.diffusion_model
 
@@ -885,7 +886,7 @@ class OuterSampleAudioNormalizationWrapper:
         pbar = comfy.utils.ProgressBar(self.total_steps)
         self.full_step = 0
 
-        previewer = latent_preview.get_previewer(guider.model_patcher.load_device, guider.model_patcher.model.latent_format)
+        previewer = latent_preview.get_previewer(context, guider.model_patcher.load_device, guider.model_patcher.model.latent_format)
         def custom_callback(step, x0, x, total_steps):
             if x0_output is not None:
                 x0_output["x0"] = x0
@@ -1447,7 +1448,7 @@ import folder_paths
 class LTX2LoraLoaderAdvanced(io.ComfyNode):
 
     @classmethod
-    def define_schema(cls):
+    def define_schema(cls, exec_context: execution_context.ExecutionContext):
         return io.Schema(
             node_id="LTX2LoraLoaderAdvanced",
             display_name="LTX2 LoRA Loader Advanced",
@@ -1455,7 +1456,7 @@ class LTX2LoraLoaderAdvanced(io.ComfyNode):
             description="Advanced LoRA loader with per-block strength control for LTX2 models",
             is_experimental=True,
             inputs=[
-                io.Combo.Input("lora_name", options=folder_paths.get_filename_list("loras"), tooltip="The name of the LoRA."),
+                io.Combo.Input("lora_name", options=folder_paths.get_filename_list(exec_context, "loras"), tooltip="The name of the LoRA."),
                 io.Model.Input("model", tooltip="The diffusion model the LoRA will be applied to."),
                 io.Float.Input("strength_model", default=1.0, min=-100.0, max=100.0, step=0.01, tooltip="How strongly to modify the diffusion model. This value can be negative."),
                 io.String.Input("opt_lora_path", optional=True, force_input=True,tooltip="Absolute path of the LoRA."),
@@ -1471,17 +1472,20 @@ class LTX2LoraLoaderAdvanced(io.ComfyNode):
                 io.String.Output(display_name="rank", tooltip="Possible rank of the LoRA."),
                 io.String.Output(display_name="loaded_keys_info", tooltip="List of loaded keys and their alpha values."),
             ],
+            hidden=[
+                io.Hidden.exec_context
+            ]
         )
 
     @classmethod
-    def execute(cls, model, lora_name, strength_model, video, video_to_audio, audio, audio_to_video, other, opt_lora_path=None, blocks=None) -> io.NodeOutput:
+    def execute(cls, model, lora_name, strength_model, video, video_to_audio, audio, audio_to_video, other, opt_lora_path=None, blocks=None, exec_context:execution_context.ExecutionContext=None) -> io.NodeOutput:
         from comfy.utils import load_torch_file
         import comfy.lora
 
         if opt_lora_path:
             lora_path = opt_lora_path
         else:
-            lora_path = folder_paths.get_full_path("loras", lora_name)
+            lora_path = folder_paths.get_full_path(exec_context, "loras", lora_name)
 
         lora = load_torch_file(lora_path, safe_load=True)
 

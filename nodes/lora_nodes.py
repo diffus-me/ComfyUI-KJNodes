@@ -1,6 +1,7 @@
 import torch
 import comfy.model_management
 import comfy.utils
+import execution_context
 import folder_paths
 import os
 import logging
@@ -152,7 +153,8 @@ def calc_lora_model(model_diff, rank, prefix_model, prefix_lora, output_sd, lora
 
 class LoraExtractKJ:
     def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
+        # self.output_dir = folder_paths.get_output_directory()
+        pass
 
     @classmethod
     def INPUT_TYPES(s):
@@ -170,6 +172,9 @@ class LoraExtractKJ:
                     "adaptive_param": ("FLOAT", {"default": 0.15, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "For ratio mode, this is the ratio of the maximum singular value. For quantile mode, this is the quantile of the singular values. For fro mode, this is the Frobenius norm retention ratio."}),
                     "clamp_quantile": ("BOOLEAN", {"default": True}),
                 },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT",
+            }
 
     }
     RETURN_TYPES = ()
@@ -178,7 +183,7 @@ class LoraExtractKJ:
 
     CATEGORY = "KJNodes/lora"
 
-    def save(self, finetuned_model, original_model, filename_prefix, rank, lora_type, algorithm, lowrank_iters, output_dtype, bias_diff, adaptive_param, clamp_quantile):
+    def save(self, finetuned_model, original_model, filename_prefix, rank, lora_type, algorithm, lowrank_iters, output_dtype, bias_diff, adaptive_param, clamp_quantile, context: execution_context.ExecutionContext):
         if algorithm == "svd_lowrank" and lora_type != "standard":
             raise ValueError("svd_lowrank algorithm is only supported for standard LoRA extraction.")
 
@@ -188,8 +193,8 @@ class LoraExtractKJ:
         for k in kp:
             m.add_patches({k: kp[k]}, - 1.0, 1.0)
         model_diff = m
-
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
+        output_dir = folder_paths.get_output_directory(context.user_hash)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
 
         output_sd = {}
         if model_diff is not None:
@@ -205,28 +210,32 @@ class LoraExtractKJ:
         return {}
 
 NODE_CLASS_MAPPINGS = {
-    "LoraExtractKJ": LoraExtractKJ
+    # "LoraExtractKJ": LoraExtractKJ
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LoraExtractKJ": "LoraExtractKJ"
+    # "LoraExtractKJ": "LoraExtractKJ"
 }
 
 class LoraReduceRank:
     def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
+        # self.output_dir = folder_paths.get_output_directory()
+        pass
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": 
                 {
-                    "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
+                    "lora_name": (folder_paths.get_filename_list(context, "loras"), {"tooltip": "The name of the LoRA."}),
                     "new_rank": ("INT", {"default": 8, "min": 1, "max": 4096, "step": 1, "tooltip": "The new rank to resize the LoRA. Acts as max rank when using dynamic_method."}),
                     "dynamic_method": (["disabled", "sv_ratio", "sv_cumulative", "sv_fro"], {"default": "disabled", "tooltip": "Method to use for dynamically determining new alphas and dims"}),
                     "dynamic_param": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Method to use for dynamically determining new alphas and dims"}),
                     "output_dtype": (["match_original", "fp16", "bf16", "fp32"], {"default": "match_original", "tooltip": "Data type to save the LoRA as."}),
                     "verbose": ("BOOLEAN", {"default": True}),
                 },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT",
+            }
 
     }
     RETURN_TYPES = ()
@@ -237,9 +246,9 @@ class LoraReduceRank:
 
     CATEGORY = "KJNodes/lora"
 
-    def save(self, lora_name, new_rank, output_dtype, dynamic_method, dynamic_param, verbose):
+    def save(self, lora_name, new_rank, output_dtype, dynamic_method, dynamic_param, verbose, context: execution_context.ExecutionContext):
 
-        lora_path = folder_paths.get_full_path("loras", lora_name)
+        lora_path = folder_paths.get_full_path(context, "loras", lora_name)
         lora_sd, metadata = comfy.utils.load_torch_file(lora_path, return_metadata=True)
 
         if output_dtype == "fp16":
@@ -282,7 +291,8 @@ class LoraReduceRank:
 
         output_filename_prefix = "loras/" + lora_name
 
-        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(output_filename_prefix, self.output_dir)
+        output_dir = folder_paths.get_output_directory(context.user_hash)
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(output_filename_prefix, output_dir)
         output_dtype_str = f"_{output_dtype}" if output_dtype != "match_original" else ""
         average_rank = str(int(np.mean(rank_list)))
         rank_str = new_rank if dynamic_method == "disabled" else f"dynamic_{average_rank}"
@@ -294,11 +304,11 @@ class LoraReduceRank:
         return {}
 
 NODE_CLASS_MAPPINGS = {
-    "LoraExtractKJ": LoraExtractKJ
+    # "LoraExtractKJ": LoraExtractKJ
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LoraExtractKJ": "LoraExtractKJ"
+    # "LoraExtractKJ": "LoraExtractKJ"
 }
 
 # Convert LoRA to different rank approximation (should only be used to go to lower rank)

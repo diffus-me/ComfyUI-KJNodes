@@ -14,6 +14,7 @@ import comfy.model_patcher
 import comfy.utils
 import comfy.sd
 
+import execution_context
 
 try:
     from comfy_api.latest import io
@@ -145,15 +146,17 @@ class PathchSageAttentionKJ():
 
 class CheckpointLoaderKJ():
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
-            "ckpt_name": (folder_paths.get_filename_list("checkpoints"), {"tooltip": "The name of the checkpoint (model) to load."}),
+            "ckpt_name": (folder_paths.get_filename_list(context, "checkpoints"), {"tooltip": "The name of the checkpoint (model) to load."}),
             "weight_dtype": (["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2", "fp16", "bf16", "fp32"],),
             "compute_dtype": (["default", "fp16", "bf16", "fp32"], {"default": "default", "tooltip": "The compute dtype to use for the model."}),
             "patch_cublaslinear": ("BOOLEAN", {"default": False, "tooltip": "Enable or disable the cublas_ops arg"}),
             "sage_attention": (sageattn_modes, {"default": False, "tooltip": "Patch comfy attention to use sageattn."}),
             "enable_fp16_accumulation": ("BOOLEAN", {"default": False, "tooltip": "Enable torch.backends.cuda.matmul.allow_fp16_accumulation, required minimum pytorch version 2.7.1"}),
-        }}
+        },
+        "hidden": {"context": "EXECUTION_CONTEXT"},
+        }
 
     RETURN_TYPES = ("MODEL", "CLIP", "VAE")
     FUNCTION = "load"
@@ -161,7 +164,7 @@ class CheckpointLoaderKJ():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
-    def load(self, ckpt_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation):
+    def load(self, ckpt_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation, context: execution_context.ExecutionContext):
         DTYPE_MAP = {
             "fp8_e4m3fn": torch.float8_e4m3fn,
             "fp8_e5m2": torch.float8_e5m2,
@@ -183,7 +186,7 @@ class CheckpointLoaderKJ():
         else:
             args.fast.discard("cublas_ops")
 
-        ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", ckpt_name)
+        ckpt_path = folder_paths.get_full_path_or_raise(context, "checkpoints", ckpt_name)
         sd, metadata = comfy.utils.load_torch_file(ckpt_path, return_metadata=True)
 
         model, clip, vae, _ = comfy.sd.load_state_dict_guess_config(
@@ -221,10 +224,13 @@ class CheckpointLoaderKJ():
 
 class DiffusionModelSelector():
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
-            "model_name": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load."}),
+            "model_name": (folder_paths.get_filename_list(context, "diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load."}),
         },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT",
+            }
         }
 
     RETURN_TYPES = ("STRING",)
@@ -234,15 +240,15 @@ class DiffusionModelSelector():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
-    def get_path(self, model_name):
-        model_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+    def get_path(self, model_name, context: execution_context.ExecutionContext):
+        model_path = folder_paths.get_full_path_or_raise(context, "diffusion_models", model_name)
         return (model_path,)
 
 class DiffusionModelLoaderKJ():
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
-            "model_name": (folder_paths.get_filename_list("diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load."}),
+            "model_name": (folder_paths.get_filename_list(context, "diffusion_models"), {"tooltip": "The name of the checkpoint (model) to load."}),
             "weight_dtype": (["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2", "fp16", "bf16", "fp32"],),
             "compute_dtype": (["default", "fp16", "bf16", "fp32"], {"default": "default", "tooltip": "The compute dtype to use for the model."}),
             "patch_cublaslinear": ("BOOLEAN", {"default": False, "tooltip": "Enable or disable the cublas_ops arg"}),
@@ -251,6 +257,9 @@ class DiffusionModelLoaderKJ():
         },
         "optional": {
             "extra_state_dict": ("STRING", {"forceInput": True, "tooltip": "The full path to an additional state dict to load, this will be merged with the main state dict. Useful for example to add VACE module to a WanVideoModel. You can use DiffusionModelSelector to easily get the path."}),
+        },
+        "hidden": {
+            "context": "EXECUTION_CONTEXT"
         }
         }
 
@@ -260,7 +269,7 @@ class DiffusionModelLoaderKJ():
     EXPERIMENTAL = True
     CATEGORY = "KJNodes/experimental"
 
-    def patch_and_load(self, model_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation, extra_state_dict=None):
+    def patch_and_load(self, model_name, weight_dtype, compute_dtype, patch_cublaslinear, sage_attention, enable_fp16_accumulation, extra_state_dict=None, context: execution_context.ExecutionContext=None):
         DTYPE_MAP = {
             "fp8_e4m3fn": torch.float8_e4m3fn,
             "fp8_e5m2": torch.float8_e5m2,
@@ -291,7 +300,7 @@ class DiffusionModelLoaderKJ():
         else:
             args.fast.discard("cublas_ops")
 
-        unet_path = folder_paths.get_full_path_or_raise("diffusion_models", model_name)
+        unet_path = folder_paths.get_full_path_or_raise(context, "diffusion_models", model_name)
 
         sd, metadata = comfy.utils.load_torch_file(unet_path, return_metadata=True)
         if extra_state_dict is not None:
@@ -473,7 +482,7 @@ class TorchCompileModelWanVideoV2:
             else:
                 compile_key_list =["diffusion_model"]
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
         except:
             raise RuntimeError("Failed to compile model")
 
@@ -508,7 +517,7 @@ class TorchCompileModelAdvanced:
         from comfy_api.torch_helpers import set_torch_compile_wrapper
         m = model.clone()
         diffusion_model = m.get_model_object("diffusion_model")
-        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit   
+        torch._dynamo.config.cache_size_limit = dynamo_cache_size_limit
 
         try:
             if compile_transformer_blocks_only:
@@ -534,7 +543,7 @@ class TorchCompileModelAdvanced:
             except KeyError:
                 raise ValueError(f"Invalid dynamic arg {dynamic}")
 
-            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)           
+            set_torch_compile_wrapper(model=m, keys=compile_key_list, backend=backend, mode=mode, dynamic=dynamic, fullgraph=fullgraph)
         except:
             raise RuntimeError("Failed to compile model")
 
@@ -1556,10 +1565,10 @@ class CFGZeroStarAndInit:
 
 class GGUFLoaderKJ(io.ComfyNode):
     @classmethod
-    def define_schema(cls):
+    def define_schema(cls, exec_cotext: execution_context.ExecutionContext):
         # Get GGUF models safely, fallback to empty list if unet_gguf folder doesn't exist
         try:
-            gguf_models = folder_paths.get_filename_list("unet_gguf")
+            gguf_models = folder_paths.get_filename_list(exec_cotext, "unet_gguf")
         except KeyError:
             gguf_models = []
 
@@ -1579,6 +1588,9 @@ class GGUFLoaderKJ(io.ComfyNode):
 
             ],
             outputs=[io.Model.Output(),],
+            hidden=[
+                io.Hidden.exec_context
+            ]
         )
 
     def attention_override_pytorch(func, *args, **kwargs):
@@ -1619,7 +1631,7 @@ class GGUFLoaderKJ(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation):
+    def execute(cls, model_name, extra_model_name, dequant_dtype, patch_dtype, patch_on_device, attention_override, enable_fp16_accumulation, exec_context: execution_context.ExecutionContext):
         gguf_nodes = cls._get_gguf_module()
         ops = gguf_nodes.ops.GGMLOps()
 
@@ -1636,7 +1648,7 @@ class GGUFLoaderKJ(io.ComfyNode):
 
         # init model
         extra = {}
-        model_path = folder_paths.get_full_path("unet", model_name)
+        model_path = folder_paths.get_full_path(exec_context, "unet", model_name)
         try:
             sd, extra = gguf_nodes.loader.gguf_sd_loader(model_path)
         except:
@@ -1645,7 +1657,7 @@ class GGUFLoaderKJ(io.ComfyNode):
         if extra_model_name is not None and extra_model_name != "none":
             if not extra_model_name.endswith(".gguf"):
                 raise ValueError("Extra model must also be a .gguf file")
-            extra_model_full_path = folder_paths.get_full_path("unet", extra_model_name)
+            extra_model_full_path = folder_paths.get_full_path(exec_context, "unet", extra_model_name)
             extra_model = gguf_nodes.loader.gguf_sd_loader(extra_model_full_path)
             sd.update(extra_model)
 
@@ -1867,6 +1879,7 @@ class VisualizeCUDAMemoryHistory():
         },
          "hidden": {
                 "unique_id": "UNIQUE_ID",
+                "context": "EXECUTION_CONTEXT",
             },
         }
 
@@ -1877,13 +1890,13 @@ class VisualizeCUDAMemoryHistory():
     DESCRIPTION = "Visualizes a CUDA memory allocation history file, opens in browser"
     OUTPUT_NODE = True
 
-    def visualize(self, snapshot_path, unique_id):
+    def visualize(self, snapshot_path, unique_id, context: execution_context.ExecutionContext):
         import pickle
         from torch.cuda import _memory_viz
         import uuid
 
         from folder_paths import get_output_directory
-        output_dir = get_output_directory()
+        output_dir = get_output_directory(user_hash=context.user_hash)
 
         with open(snapshot_path, "rb") as f:
             snapshot = pickle.load(f)

@@ -14,6 +14,8 @@ from comfy_api.latest import io
 import node_helpers
 from io import BytesIO
 
+import execution_context
+
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 folder_paths.add_model_folder_path("kjnodes_fonts", os.path.join(script_directory, "fonts"))
 
@@ -1545,22 +1547,31 @@ https://huggingface.co/stabilityai/sv3d
 
 class LoadResAdapterNormalization:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": {
                 "model": ("MODEL",),
-                "resadapter_path": (folder_paths.get_filename_list("checkpoints"), )
-            } 
+                "resadapter_path": (folder_paths.get_filename_list(context, "checkpoints"), )
+            } ,
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+            },
         }
 
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "load_res_adapter"
     CATEGORY = "KJNodes/experimental"
 
-    def load_res_adapter(self, model, resadapter_path):
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, model, resadapter_path, context: execution_context.ExecutionContext):
+        context.validate_model("checkpoints", resadapter_path)
+        return True
+
+    def load_res_adapter(self, model, resadapter_path, context: execution_context.ExecutionContext):
         print("ResAdapter: Checking ResAdapter path")
-        resadapter_full_path = folder_paths.get_full_path("checkpoints", resadapter_path)
-        if not os.path.exists(resadapter_full_path):
+        resadapter_full_path = folder_paths.get_full_path(context, "checkpoints", resadapter_path)
+        if not os.path.exists(str(resadapter_full_path)):
             raise Exception("Invalid model path")
         else:
             print("ResAdapter: Loading ResAdapter normalization weights")
@@ -1977,16 +1988,19 @@ class DiTBlockLoraLoader:
         self.loaded_lora = None
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {"required": {
                 "model": ("MODEL", {"tooltip": "The diffusion model the LoRA will be applied to."}),
                 "strength_model": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01, "tooltip": "How strongly to modify the diffusion model. This value can be negative."}),
                 
                 },
                 "optional": {
-                    "lora_name": (folder_paths.get_filename_list("loras"), {"tooltip": "The name of the LoRA."}),
+                    "lora_name": (folder_paths.get_filename_list(context, "loras"), {"tooltip": "The name of the LoRA."}),
                     "opt_lora_path": ("STRING", {"forceInput": True, "tooltip": "Absolute path of the LoRA."}),
                     "blocks": ("SELECTEDDITBLOCKS",),
+                },
+                "hidden": {
+                    "context": "EXECUTION_CONTEXT"
                 }
                }
     
@@ -1996,14 +2010,19 @@ class DiTBlockLoraLoader:
     FUNCTION = "load_lora"
     CATEGORY = "KJNodes/experimental"
 
-    def load_lora(self, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None):
-        
+    @classmethod
+    def VALIDATE_INPUTS(cls, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None, context: execution_context.ExecutionContext=None):
+        context.validate_model("loras", lora_name)
+        return True
+
+    def load_lora(self, model, strength_model, lora_name=None, opt_lora_path=None, blocks=None, context: execution_context.ExecutionContext=None):
+
         import comfy.lora
 
         if opt_lora_path:
             lora_path = opt_lora_path
         else:
-            lora_path = folder_paths.get_full_path("loras", lora_name)
+            lora_path = folder_paths.get_full_path(context, "loras", lora_name)
         
         lora = None
         if self.loaded_lora is not None:
@@ -2150,8 +2169,8 @@ class SetShakkerLabsUnionControlNetType:
         return (control_net,)
 
 class ModelSaveKJ:
-    def __init__(self):
-        self.output_dir = folder_paths.get_output_directory()
+    def __init__(self, execution: execution_context.ExecutionContext):
+        pass
 
     @classmethod
     def INPUT_TYPES(s):
@@ -2159,15 +2178,16 @@ class ModelSaveKJ:
                               "filename_prefix": ("STRING", {"default": "diffusion_models/ComfyUI"}),
                               "model_key_prefix": ("STRING", {"default": "model.diffusion_model."}),
                               },
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},}
+                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "context": "EXECUTION_CONTEXT"},}
     RETURN_TYPES = ()
     FUNCTION = "save"
     OUTPUT_NODE = True
 
     CATEGORY = "advanced/model_merging"
 
-    def save(self, model, filename_prefix, model_key_prefix, prompt=None, extra_pnginfo=None):
+    def save(self, model, filename_prefix, model_key_prefix, prompt=None, extra_pnginfo=None, context: execution_context.ExecutionContext=None):
         from comfy.utils import save_torch_file
+        output_dir = folder_paths.get_output_directory(context.user_hash)
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, self.output_dir)
     
         output_checkpoint = f"{filename}_{counter:05}_.safetensors"
@@ -2338,9 +2358,9 @@ class VAELoaderKJ:
     video_taes = ["taehv", "lighttaew2_2", "lighttaew2_1", "lighttaehy1_5"]
     image_taes = ["taesd", "taesdxl", "taesd3", "taef1"]
     @staticmethod
-    def vae_list(s):
-        vaes = folder_paths.get_filename_list("vae")
-        approx_vaes = folder_paths.get_filename_list("vae_approx")
+    def vae_list(s, context: execution_context.ExecutionContext):
+        vaes = folder_paths.get_filename_list(context, "vae")
+        approx_vaes = folder_paths.get_filename_list(context, "vae_approx")
         sdxl_taesd_enc = False
         sdxl_taesd_dec = False
         sd1_taesd_enc = False
@@ -2384,18 +2404,18 @@ class VAELoaderKJ:
         return vaes
 
     @staticmethod
-    def load_taesd(name):
+    def load_taesd(context: execution_context.ExecutionContext, name):
         sd = {}
-        approx_vaes = folder_paths.get_filename_list("vae_approx")
+        approx_vaes = folder_paths.get_filename_list(context, "vae_approx")
 
         encoder = next(filter(lambda a: a.startswith("{}_encoder.".format(name)), approx_vaes))
         decoder = next(filter(lambda a: a.startswith("{}_decoder.".format(name)), approx_vaes))
 
-        enc = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", encoder))
+        enc = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise(context, "vae_approx", encoder))
         for k in enc:
             sd["taesd_encoder.{}".format(k)] = enc[k]
 
-        dec = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise("vae_approx", decoder))
+        dec = comfy.utils.load_torch_file(folder_paths.get_full_path_or_raise(context, "vae_approx", decoder))
         for k in dec:
             sd["taesd_decoder.{}".format(k)] = dec[k]
 
@@ -2414,19 +2434,22 @@ class VAELoaderKJ:
         return sd
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
-            "required": { "vae_name": (s.vae_list(s), ),
+            "required": { "vae_name": (s.vae_list(s, context), ),
                           "device": (["main_device", "cpu"],),
                           "weight_dtype": (["bf16", "fp16", "fp32" ],),
-                         }
+                         },
+            "hidden": {
+                "context": "EXECUTION_CONTEXT",
+                }
             }
 
     RETURN_TYPES = ("VAE",)
     FUNCTION = "load_vae"
     CATEGORY = "KJNodes/vae"
 
-    def load_vae(self, vae_name, device, weight_dtype):
+    def load_vae(self, vae_name, device, weight_dtype, context: execution_context.ExecutionContext):
         from comfy.sd import VAE
         metadata = None
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[weight_dtype]
@@ -2439,12 +2462,12 @@ class VAELoaderKJ:
             sd = {}
             sd["pixel_space_vae"] = torch.tensor(1.0)
         elif vae_name in self.image_taes:
-            sd = self.load_taesd(vae_name)
+            sd = self.load_taesd(context, vae_name)
         else:
             if os.path.splitext(vae_name)[0] in self.video_taes:
-                vae_path = folder_paths.get_full_path_or_raise("vae_approx", vae_name)
+                vae_path = folder_paths.get_full_path_or_raise(context, "vae_approx", vae_name)
             else:
-                vae_path = folder_paths.get_full_path_or_raise("vae", vae_name)
+                vae_path = folder_paths.get_full_path_or_raise(context, "vae", vae_name)
             sd, metadata = comfy.utils.load_torch_file(vae_path, return_metadata=True)
 
         if "vocoder.conv_post.weight" in sd:
@@ -2493,7 +2516,7 @@ class Guider_ScheduledCFG(CFGGuider):
             uncond = None
             cfg = 1.0
 
-        return sampling_function(self.inner_model, x, timestep, uncond, self.conds.get("positive", None), cfg, model_options=model_options, seed=seed)            
+        return sampling_function(self.inner_model, x, timestep, uncond, self.conds.get("positive", None), cfg, model_options=model_options, seed=seed)
 
 class ScheduledCFGGuidance:
     @classmethod
@@ -2516,7 +2539,7 @@ cfg input can be a list of floats matching step count, or a single float for all
 """
 
     def get_guider(self, model, cfg, positive, negative, start_percent, end_percent):
-        guider = Guider_ScheduledCFG(model) 
+        guider = Guider_ScheduledCFG(model)
         guider.set_conds(positive, negative)
         guider.set_cfg(cfg, start_percent, end_percent)
         return (guider, )
@@ -2864,7 +2887,6 @@ Calculator node that evaluates a mathematical expression using inputs a and b.
     Supported functions: abs(), round(), min(), max(), pow(), sqrt(), sin(), cos(), tan(), log(), log10(), exp(), floor(), ceil()  
     Supported constants: pi, euler, True, False  
 """,
-            search_aliases=["math", "arithmetic", "expression", "logic"],
             inputs=[
                 io.String.Input("expression", default="a + b", multiline=True),
                 io.Autogrow.Input("variables", template=template),

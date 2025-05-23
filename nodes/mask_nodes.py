@@ -17,6 +17,8 @@ import folder_paths
 
 from ..utility.utility import tensor2pil, pil2tensor
 
+import execution_context
+
 script_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 main_device = model_management.get_torch_device()
 offload_device = model_management.unet_offload_device()
@@ -198,7 +200,7 @@ creates animation between them.
 """
 
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(s, context: execution_context.ExecutionContext):
         return {
             "required": {
                  "invert": ("BOOLEAN", {"default": False}),
@@ -208,15 +210,18 @@ creates animation between them.
                  "font_size": ("INT", {"default": 32,"min": 8, "max": 4096, "step": 1}),
                  "font_color": ("STRING", {"default": "white"}),
                  "text": ("STRING", {"default": "HELLO!", "multiline": True}),
-                 "font": (folder_paths.get_filename_list("kjnodes_fonts"), ),
+                 "font": (folder_paths.get_filename_list(context, "kjnodes_fonts"), ),
                  "width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                  "start_rotation": ("INT", {"default": 0,"min": 0, "max": 359, "step": 1}),
                  "end_rotation": ("INT", {"default": 0,"min": -359, "max": 359, "step": 1}),
         },
-    } 
+            "hidden": {
+                "context": "EXECUTION_CONTEXT"
+        },
+        }
 
-    def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_color, font, start_rotation, end_rotation):
+    def createtextmask(self, frames, width, height, invert, text_x, text_y, text, font_size, font_color, font, start_rotation, end_rotation, context: execution_context.ExecutionContext):
     # Define the number of images in the batch
         batch_size = frames
         out = []
@@ -225,7 +230,7 @@ creates animation between them.
         if start_rotation != end_rotation:
             rotation_increment = (end_rotation - start_rotation) / (batch_size - 1)
 
-        font_path = folder_paths.get_full_path("kjnodes_fonts", font)
+        font_path = folder_paths.get_full_path(context, "kjnodes_fonts", font)
         # Generate the text
         for i in range(batch_size):
             image = Image.new("RGB", (width, height), "black")
