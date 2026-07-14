@@ -351,6 +351,7 @@ def _load_diffusion_model_kj(unet_path, model_options=None, extra_state_dict=Non
         model_options=model_options,
         metadata=metadata,
         disable_dynamic=disable_dynamic,
+        model_name=unet_path,
     )
 
     model.cached_patcher_init = (_load_diffusion_model_kj, (unet_path, model_options, extra_state_dict))
@@ -1713,7 +1714,7 @@ class GGUFLoaderKJ(io.ComfyNode):
             sd.update(extra_model)
 
         model = comfy.sd.load_diffusion_model_state_dict(
-            sd, model_options={"custom_operations": ops}, metadata=extra.get("metadata", {})
+            sd, model_options={"custom_operations": ops}, metadata=extra.get("metadata", {}), model_name=model_name
         )
         if model is None:
             raise RuntimeError(f"ERROR: Could not detect model type of: {model_path}")
