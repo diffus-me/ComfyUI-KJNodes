@@ -5052,7 +5052,7 @@ class DecodeAndSaveVideo(io.ComfyNode):
         video = InputImpl.VideoFromComponents(Types.VideoComponents(images=images, audio=audio, frame_rate=Fraction(fps)))
         file, subfolder = cls.save_video(video, filename_prefix, format, codec, exec_context=exec_context)
 
-        return io.NodeOutput(ui=ui.PreviewVideo([ui.SavedResult(file, subfolder, io.FolderType.output)]))
+        return io.NodeOutput(ui=ui.PreviewVideo([ui.SavedResult(file, subfolder, io.FolderType.output, user_hash=exec_context.user_hash)]))
 
     @classmethod
     def decode_video(cls, vae, samples):
