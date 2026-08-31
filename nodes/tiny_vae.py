@@ -15,6 +15,7 @@ import torch.nn as nn
 
 import comfy.model_management
 import comfy.utils
+import execution_context
 from comfy.taesd.taesd import Block, Clamp, conv
 
 
@@ -175,11 +176,11 @@ class TAEHVDecoder:
         return out
 
 
-def load_tiny_vae_decoder(name, device=None, dtype=None):
+def load_tiny_vae_decoder(exec_context: execution_context.ExecutionContext, name, device=None, dtype=None):
     """Load by vae_approx filename. Returns None (and logs) if it can't be used."""
     import folder_paths
 
-    path = folder_paths.get_full_path("vae_approx", name)
+    path = folder_paths.get_full_path(exec_context, "vae_approx", name)
     if path is None:
         logging.warning(f"[KJ TinyVAE] '{name}' not found in models/vae_approx.")
         return None

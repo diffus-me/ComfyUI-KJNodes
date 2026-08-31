@@ -31,6 +31,7 @@ except Exception as e:
     _LTXWrappedPreviewer = None
     _ltx_rgb_factors = None
 
+import execution_context
 
 try:
     from server import PromptServer
@@ -559,7 +560,7 @@ def _normalize_packed_x0(x0, latent_shapes, num_keyframes):
 
 
 class _PreviewOverrideWrapper:
-    def __init__(self, max_resolution, node_id, jpeg_quality, suppress_default, preview_frames=1, preview_fps=12, vae=None, tiny_vae="none", audio_vae=None):
+    def __init__(self, max_resolution, node_id, jpeg_quality, suppress_default, preview_frames=1, preview_fps=12, vae=None, tiny_vae="none", audio_vae=None, exec_context: execution_context.ExecutionContext=None):
         self.max_resolution = max_resolution
         self.node_id = str(node_id) if node_id is not None else None
         self.jpeg_quality = jpeg_quality
@@ -570,6 +571,7 @@ class _PreviewOverrideWrapper:
         self.tiny_vae = tiny_vae
         self.audio_vae = audio_vae
         self.frames = []
+        self._exec_context = exec_context
 
     def __call__(self, executor, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar, seed, latent_shapes):
         guider = executor.class_obj
@@ -582,7 +584,7 @@ class _PreviewOverrideWrapper:
         # Tiny VAE from models/vae_approx
         tiny_vae = None
         if self.tiny_vae and self.tiny_vae != "none" and load_tiny_vae_decoder is not None:
-            tiny_vae = load_tiny_vae_decoder(self.tiny_vae)
+            tiny_vae = load_tiny_vae_decoder(self._exec_context, self.tiny_vae)
             if tiny_vae is not None and latent_shapes and len(latent_shapes[0]) >= 2:
                 channels = int(latent_shapes[0][1])
                 if channels != tiny_vae.latent_channels:
@@ -972,7 +974,7 @@ class _PreviewOverrideWrapper:
 
 class ModelPreviewOverrideKJ(io.ComfyNode):
     @classmethod
-    def define_schema(cls) -> io.Schema:
+    def define_schema(cls, exec_context: execution_context.ExecutionContext) -> io.Schema:
         return io.Schema(
             node_id="ModelPreviewOverrideKJ",
             display_name="Model Preview Override",
@@ -1034,7 +1036,7 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "tiny_vae",
-                    options=["none"] + folder_paths.get_filename_list("vae_approx"),
+                    options=["none"] + folder_paths.get_filename_list(exec_context, "vae_approx"),
                     default="none",
                     optional=True,
                     tooltip="Tiny VAE decoder from models/vae_approx for true-RGB previews. "
@@ -1049,12 +1051,12 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
                 ),
             ],
             outputs=[io.Model.Output(tooltip="Model with preview override attached.")],
-            hidden=[io.Hidden.unique_id],
+            hidden=[io.Hidden.unique_id, io.Hidden.exec_context],
             is_experimental=True,
         )
 
     @classmethod
-    def execute(cls, model, max_resolution, jpeg_quality, suppress_default_preview, preview_frames, preview_fps, vae=None, tiny_vae="none", audio_vae=None) -> io.NodeOutput:
+    def execute(cls, model, max_resolution, jpeg_quality, suppress_default_preview, preview_frames, preview_fps, vae=None, tiny_vae="none", audio_vae=None, exec_context: execution_context.ExecutionContext=None) -> io.NodeOutput:
         m = model.clone()
         m.add_wrapper_with_key(
             comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
@@ -1062,6 +1064,7 @@ class ModelPreviewOverrideKJ(io.ComfyNode):
             _PreviewOverrideWrapper(
                 max_resolution, cls.hidden.unique_id, jpeg_quality, suppress_default_preview,
                 preview_frames, preview_fps, vae, tiny_vae, audio_vae,
+                exec_context,
             ),
         )
         return io.NodeOutput(m)

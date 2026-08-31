@@ -3665,7 +3665,7 @@ class SaveImageKJ:
     CATEGORY = "KJNodes/image"
     DESCRIPTION = "Saves the input images to your ComfyUI output directory."
 
-    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, context: execution_context.ExecutionContext=None, caption=None, caption_file_extension=".txt"):
+    def save_images(self, images, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, caption=None, caption_file_extension=".txt", context: execution_context.ExecutionContext=None):
         filename_prefix += self.prefix_append
         output_dir = folder_paths.get_output_directory(context.user_hash)
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir, images[0].shape[1], images[0].shape[0])
